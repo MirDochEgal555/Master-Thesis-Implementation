@@ -1,0 +1,16 @@
+done seed=1 w=1 lam=1.0 networksize=64 leanrate=0.007 sharpe=1.145 cumret=1.142 meanret=0.001 stdret=0.015
+done seed=1 w=1 lam=1.0 networksize=64 leanrate=0.006 sharpe=1.145 cumret=1.142 meanret=0.001 stdret=0.015
+done seed=0 w=1 lam=1.0 networksize=64 leanrate=0.006 sharpe=1.715 cumret=1.093 meanret=0.001 stdret=0.007
+done seed=1 w=1 lam=1.0 networksize=64 leanrate=0.005 sharpe=5.287 cumret=1.500 meanret=0.004 stdret=0.012
+done seed=1 w=1 lam=1.0 networksize=64 leanrate=0.004 sharpe=3.165 cumret=1.304 meanret=0.002 stdret=0.012
+done seed=0 w=1 lam=1.0 networksize=64 leanrate=0.004 sharpe=2.278 cumret=1.176 meanret=0.001 stdret=0.009
+done seed=2 w=1 lam=1.0 networksize=64 leanrate=0.004 sharpe=1.701 cumret=1.091 meanret=0.001 stdret=0.007
+done seed=0 w=1 lam=1.0 networksize=64 leanrate=0.005 sharpe=5.888 cumret=1.540 meanret=0.004 stdret=0.011
+done seed=2 w=1 lam=1.0 networksize=64 leanrate=0.005 sharpe=1.706 cumret=1.091 meanret=0.001 stdret=0.007
+done seed=0 w=1 lam=1.0 networksize=64 leanrate=0.007 sharpe=1.832 cumret=1.108 meanret=0.001 stdret=0.007
+done seed=2 w=1 lam=1.0 networksize=64 leanrate=0.006 sharpe=1.711 cumret=1.091 meanret=0.001 stdret=0.007
+done seed=2 w=1 lam=1.0 networksize=64 leanrate=0.007 sharpe=1.715 cumret=1.092 meanret=0.001 stdret=0.007
+done seed=3 w=1 lam=1.0 networksize=64 leanrate=0.005 sharpe=1.694 cumret=1.142 meanret=0.001 stdret=0.010
+done seed=3 w=1 lam=1.0 networksize=64 leanrate=0.006 sharpe=4.922 cumret=1.418 meanret=0.003 stdret=0.010
+done seed=3 w=1 lam=1.0 networksize=64 leanrate=0.004 sharpe=2.098 cumret=1.188 meanret=0.001 stdret=0.011
+done seed=3 w=1 lam=1.0 networksize=64 leanrate=0.007 sharpe=6.059 cumret=1.596 meanret=0.005 stdret=0.012
