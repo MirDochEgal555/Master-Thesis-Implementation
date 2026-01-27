@@ -9,13 +9,13 @@ from .backtest_seed import run_one
 from .config import TrainConfig
 
 
-def grid_search(seeds, window_sizes, lambdas, max_workers=4, line_log_path="grid_search_lines.txt"):
+def grid_search(seeds, window_sizes, lambdas, max_workers=4, line_log_path="grid_search_lines.txt", data_bundle=None):
     jobs = list(product(seeds, window_sizes, lambdas))
     results = []
     mp.set_start_method("spawn", force=True)
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(run_one, s, w, l) for (s, w, l) in jobs]
+        futs = [ex.submit(run_one, s, w, l, data_bundle=data_bundle) for (s, w, l) in jobs]
         with open(line_log_path, "w", encoding="utf-8") as log_f:
             for f in as_completed(futs):
                 r = f.result()

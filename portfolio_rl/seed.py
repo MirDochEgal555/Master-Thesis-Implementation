@@ -12,7 +12,7 @@ from .data import YahooConfig, YahooReturnsDataset
 from .utils import set_seed
 
 
-def run_one(seed: int, window_size: int, lam: float, networksize: int, learnrate: float, *, cache_path="returns.parquet", cfg=None):
+def run_one(seed: int, window_size: int, lam: float, networksize: int, learnrate: float, *, cache_path="returns.parquet", cfg=None, data_bundle=None):
     # one process = one thread (important for parallel speed)
     torch.set_num_threads(1)
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -20,22 +20,25 @@ def run_one(seed: int, window_size: int, lam: float, networksize: int, learnrate
 
     set_seed(seed)
 
-    tickers = ['JPM', 'JNJ', 'XOM', 'PG', 'MSFT']
-    ycfg = YahooConfig(
-        tickers=tickers,
-        start_date="2022-01-01",
-        end_date="2024-12-31",
-        price_field="Close",
-        cache_path=cache_path,
-    )
+    if data_bundle is None:
+        tickers = ['JPM', 'JNJ', 'XOM', 'PG', 'MSFT']
+        ycfg = YahooConfig(
+            tickers=tickers,
+            start_date="2022-01-01",
+            end_date="2024-12-31",
+            price_field="Close",
+            cache_path=cache_path,
+        )
 
-    dataset = YahooReturnsDataset(ycfg)
-    train_view, val_view, test_view = dataset.split_by_date(
-        train_end="2023-03-24",
-        val_end="2023-09-30",
-    )
+        dataset = YahooReturnsDataset(ycfg)
+        train_view, val_view, test_view = dataset.split_by_date(
+            train_end="2023-03-24",
+            val_end="2023-09-30",
+        )
 
-    train_covs = train_view.precompute_expanding_cov(diag=True)
+        train_covs = train_view.precompute_expanding_cov(diag=True)
+    else:
+        train_view, val_view, test_view, train_covs = data_bundle
 
 
     # ---- use the SAME trainer instance across warmup+train ----
@@ -59,7 +62,7 @@ def run_one(seed: int, window_size: int, lam: float, networksize: int, learnrate
         )
 
     device = torch.device(cfg.device)
-    K = dataset.K
+    K = train_view.K
 
     policy = PolicyNet(K=K,hidden=networksize).to(device)
     value = ValueNet(K).to(device)

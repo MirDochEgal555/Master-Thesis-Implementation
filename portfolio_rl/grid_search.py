@@ -8,13 +8,13 @@ import multiprocessing as mp
 from .seed import run_one
 
 
-def grid_search(seeds, window_sizes, lambdas, networksizes, leanrates, max_workers=None, line_log_path="grid_search_lines.txt"):
+def grid_search(seeds, window_sizes, lambdas, networksizes, leanrates, max_workers=None, line_log_path="grid_search_lines.txt", data_bundle=None):
     jobs = list(product(seeds, window_sizes, lambdas, networksizes, leanrates))
     results = []
     mp.set_start_method("spawn", force=True)
 
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(run_one, s, w, l, ns, lr) for (s, w, l, ns, lr) in jobs]
+        futs = [ex.submit(run_one, s, w, l, ns, lr, data_bundle=data_bundle) for (s, w, l, ns, lr) in jobs]
         with open(line_log_path, "w", encoding="utf-8") as log_f:
             for f in as_completed(futs):
                 r = f.result()

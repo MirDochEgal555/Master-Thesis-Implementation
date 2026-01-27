@@ -72,12 +72,12 @@ class Trainer:
         rewards = torch.empty(T, device=device)
 
         # ---- portfolio state carry ----
+        y_prev = torch.full((K,), 1.0 / K, device=device)
+        loc_prev = torch.full((K,), 1.0 / K, device=device)
+        log_std_prev = torch.full((K,), 0.0, device=device)
         w_prev = state.get("w_prev")
         if w_prev is None:
             w_prev = torch.full((K,), 1.0 / K, device=device)
-            y_prev = torch.full((K,), 1.0 / K, device=device)
-            loc_prev = torch.full((K,), 1.0 / K, device=device)
-            log_std_prev = torch.full((K,), 0.0, device=device)
         else:
             w_prev = w_prev.detach().to(device)
 
