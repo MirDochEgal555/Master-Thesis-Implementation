@@ -16,11 +16,11 @@ class LearnableKalman(nn.Module):
 
     @property
     def Q(self):
-        return 0.0032*1e-3*torch.eye(self.dim)#torch.diag(torch.exp(self.log_q) + 1e-8)
+        return 1e-3*torch.eye(self.dim)#0.0032*1e-3*torch.eye(self.dim)#torch.diag(torch.exp(self.log_q) + 1e-8)
 
     @property
     def R(self):
-        return 0.00038*1e-3*torch.eye(self.dim)#torch.diag(torch.exp(self.log_r) + 1e-8)
+        return 1e-3*torch.eye(self.dim)#0.00038*1e-3*torch.eye(self.dim)#torch.diag(torch.exp(self.log_r) + 1e-8)
 
     @torch.no_grad()
     def project_A_spectral(self, rho_max: float = 0.98, iters: int = 15):

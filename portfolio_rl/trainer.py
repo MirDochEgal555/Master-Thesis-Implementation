@@ -75,6 +75,9 @@ class Trainer:
         w_prev = state.get("w_prev")
         if w_prev is None:
             w_prev = torch.full((K,), 1.0 / K, device=device)
+            y_prev = torch.full((K,), 1.0 / K, device=device)
+            loc_prev = torch.full((K,), 1.0 / K, device=device)
+            log_std_prev = torch.full((K,), 0.0, device=device)
         else:
             w_prev = w_prev.detach().to(device)
 
@@ -181,14 +184,13 @@ class Trainer:
             prev_action = w.detach()
 
 
-            logps[t] = logistic_normal_log_prob_clr_from_y(y, w, loc, log_std, tau=1.0)
+            logps[t] = logistic_normal_log_prob_clr_from_y(y_prev, w_prev, loc_prev, log_std_prev, tau=1.0)
 
             # turnover shaping + cost
             turn_l1 = (w.detach() - w_prev).abs().sum()
             turn_ratio = turn_l1 / (cfg.turn_target + 1e-12)
             turn_bonus = torch.exp(-0.5 * 3.0 * (turn_ratio - 1.0) ** 2)
             trade_cost = cfg.cost_coef * turn_l1
-
             # reward
             r_rl, _balance = compute_reward(w_prev, z_t, cov_used, cfg.lam, kappa_unc=cfg.kappa_unc)
             #print(_balance)
@@ -196,6 +198,9 @@ class Trainer:
             rewards[t] = r_t
 
             # update prev
+            loc_prev = loc.detach()
+            log_std_prev = log_std.detach()
+            y_prev = y.detach()
             w_prev = w.detach()
             if covs is None:
                 cov_prev = cov_full.detach()
@@ -337,9 +342,6 @@ class Trainer:
         policy,
         kalman_filter,
         data_view,              # YahooReturnsDatasetView OR torch.Tensor [N,K]
-        lam=0.25,
-        kappa_unc=0.0,
-        cost_coef=0.0,
         device="cpu",
         sample_policy=False,    # <- set True to match notebook stochastic behavior
         eps_weight=1e-4,
@@ -415,19 +417,12 @@ class Trainer:
             w = w + eps_weight
             w = w / w.sum()
 
-            # reward (matches notebook intent)
-            r_rl, balance = compute_reward(w_prev, z_t, cov_prev, lam, kappa_unc=kappa_unc)
-            turnover = (w - w_prev).abs().sum()
-            r = r_rl - cost_coef * turnover
-
-            rewards[t] = r
-            pure[t] = torch.dot(w, z_t)
+            pure[t] = torch.dot(w_prev, z_t)
             weights.append(w.detach().cpu())
 
             w_prev = w
             cov_prev = cov_full
 
-        rewards_np = rewards.cpu().numpy()
         sharpe = pure.mean() / (pure.std() + 1e-8) * np.sqrt(252)
         cumret = 1 + pure.sum()
 

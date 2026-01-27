@@ -50,11 +50,12 @@ def run_one(seed: int, window_size: int, lam: float, networksize: int, learnrate
             episodes_per_batch=1,
             lam=float(lam),
             gamma=0.99,
-            dyn_enabled=True,
-            use_critic=False,
+            dyn_enabled=False,
+            use_critic=True,
             kappa_unc=0.0,
             dyn_sim_deterministic=False,
             lr_actor = learnrate,
+            use_baseline=False,
         )
 
     device = torch.device(cfg.device)

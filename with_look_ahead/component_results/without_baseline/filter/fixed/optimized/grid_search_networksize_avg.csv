@@ -1,0 +1,2 @@
+networksize,window_size,lam,learnrate,seed,sharpe,cumret,meanret,stdret
+64,1.0,2.7752499999999998,0.001,4.5,4.205475,1.376325,0.003,0.01
