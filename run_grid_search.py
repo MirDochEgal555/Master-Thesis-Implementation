@@ -20,9 +20,9 @@ if __name__ == "__main__":
 
     seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     window_sizes = [1]
-    lambdas = [0.001, 0.1, 1, 10] 
-    networksizes = [64]
-    learnrates = [1e-3]
+    lambdas = [0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 40] 
+    networksizes = [32, 64, 128]
+    learnrates = [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 1e-5]
 
     results, summary = grid_search(seeds, window_sizes, lambdas, networksizes, learnrates, max_workers=None, data_bundle=data_bundle)
 
