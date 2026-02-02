@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class PolicyNet(nn.Module):
     """
-    Outputs loc and log_std for logistic-normal / CLR sampling.
+    Outputs concentration parameters for Dirichlet sampling.
     """
     def __init__(self, K: int, hidden: int = 128):
         super().__init__()
@@ -14,14 +14,14 @@ class PolicyNet(nn.Module):
             nn.Linear(hidden, hidden),
             nn.ReLU(),
         )
-        self.loc_head = nn.Linear(hidden, K)
-        self.logstd_head = nn.Linear(hidden, K)
+        self.conc_head = nn.Linear(hidden, K)
+        self.softplus = nn.Softplus()
 
     def forward(self, x):
         h = self.net(x)
-        loc = self.loc_head(h)
-        log_std = self.logstd_head(h).clamp(-3, 1)  # helps stability
-        return loc, log_std
+        # Keep concentration strictly positive and mildly bounded away from 0.
+        concentration = self.softplus(self.conc_head(h)) + 1e-3
+        return concentration
 
 
 class ValueNet(nn.Module):

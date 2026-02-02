@@ -1,6 +1,6 @@
 # portfolio_rl/sim.py
 import torch
-from .rollouts import discounted_return, compute_reward, logistic_normal_log_prob_clr_from_y
+from .rollouts import discounted_return, compute_reward, dirichlet_log_prob
 
 @torch.no_grad()
 def _sample_next_state(pred_mean, pred_var, deterministic: bool):
@@ -62,17 +62,13 @@ def simulate_rollouts_from_dynamics(
             vals[t] = v_pred.squeeze()
 
             # policy sample (same as training)
-            loc, log_std = policy(s_t)
-            loc = loc - loc.mean(dim=-1, keepdim=True)
-            std = torch.exp(log_std)
+            concentration = policy(s_t)
+            dist = torch.distributions.Dirichlet(concentration)
+            w = dist.sample()
+            w = w.clamp_min(1e-4)
+            w = w / (w.sum(dim=-1, keepdim=True) + 1e-12)
 
-            y = loc + std * torch.randn_like(loc)
-            y = y - y.mean(dim=-1, keepdim=True)
-
-            w = torch.softmax(y, dim=-1)
-            w = (w + 1e-4) / (w.sum(dim=-1, keepdim=True) + 1e-12)
-
-            logps[t] = logistic_normal_log_prob_clr_from_y(y, w, loc, log_std, tau=1.0).squeeze()
+            logps[t] = dirichlet_log_prob(w, concentration).squeeze()
 
             # ----- dynamics step: s_{t+1} ~ N(mu, var) given (s_t, w) -----
             pred_mean, pred_var = dyn_model(s_t.unsqueeze(0), w.unsqueeze(0))  # [1,K]

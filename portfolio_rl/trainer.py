@@ -2,7 +2,7 @@ import torch
 import torch.nn.utils as U
 import numpy as np
 
-from .rollouts import discounted_return, compute_reward, logistic_normal_log_prob_clr_from_y
+from .rollouts import discounted_return, compute_reward, dirichlet_log_prob
 from .dynamics import DynamicsModel, gaussian_nll
 from .features import RollingMean
 from .sim import simulate_rollouts_from_dynamics
@@ -67,14 +67,12 @@ class Trainer:
             V_t = eyeK
 
         # rollout buffers
-        logps   = torch.empty(T, device=device)
+        logps   = []
         values  = torch.empty(T, device=device)
-        rewards = torch.empty(T, device=device)
+        rewards = []
 
         # ---- portfolio state carry ----
-        y_prev = torch.full((K,), 1.0 / K, device=device)
-        loc_prev = torch.full((K,), 1.0 / K, device=device)
-        log_std_prev = torch.full((K,), 0.0, device=device)
+        logp_prev = torch.zeros((), device=device)
         w_prev = state.get("w_prev")
         if w_prev is None:
             w_prev = torch.full((K,), 1.0 / K, device=device)
@@ -159,17 +157,11 @@ class Trainer:
             values[t] = v_pred
 
             # ----- policy sample -----
-            loc, log_std = self.policy(feat)
-
-            loc = loc - loc.mean(dim=-1, keepdim=True)
-
-            std = torch.exp(log_std)
-            y = loc + std * torch.randn_like(loc)
-            y = y - y.mean(dim=-1, keepdim=True)
-
-            w = torch.softmax(y, dim=-1)
+            concentration = self.policy(feat)
+            dist = torch.distributions.Dirichlet(concentration)
+            w = dist.sample()
             eps = 1e-4
-            w = torch.clamp(w, eps, 1.0 - eps)
+            w = w.clamp_min(eps)
             w = w / w.sum(dim=-1, keepdim=True)
 
             # state for dynamics
@@ -184,7 +176,7 @@ class Trainer:
             prev_action = w.detach()
 
 
-            logps[t] = logistic_normal_log_prob_clr_from_y(y_prev, w_prev, loc_prev, log_std_prev, tau=1.0)
+            logps.append(logp_prev)
 
             # turnover shaping + cost
             turn_l1 = (w.detach() - w_prev).abs().sum()
@@ -195,15 +187,16 @@ class Trainer:
             r_rl, _balance = compute_reward(w_prev, z_t, cov_used, cfg.lam, kappa_unc=cfg.kappa_unc)
             #print(_balance)
             r_t = r_rl - trade_cost + cfg.turn_coef * turn_bonus
-            rewards[t] = r_t
+            rewards.append(r_t)
 
             # update prev
-            loc_prev = loc.detach()
-            log_std_prev = log_std.detach()
-            y_prev = y.detach()
+            logp_prev = dirichlet_log_prob(w, concentration)
             w_prev = w.detach()
             if covs is None:
                 cov_prev = cov_full.detach()
+
+        rewards = torch.stack(rewards)
+        logps = torch.stack(logps)
 
         returns = discounted_return(rewards, cfg.gamma)
 
@@ -403,16 +396,12 @@ class Trainer:
             feat = roll.update(base_feat)
 
             # policy
-            loc, log_std = policy(feat)
-            loc = loc - loc.mean(dim=-1, keepdim=True)
-
+            concentration = policy(feat)
             if sample_policy:
-                std = torch.exp(log_std)
-                y = loc + std * torch.randn_like(loc)
-                y = y - y.mean(dim=-1, keepdim=True)
-                w = torch.softmax(y, dim=-1)
+                dist = torch.distributions.Dirichlet(concentration)
+                w = dist.sample()
             else:
-                w = torch.softmax(loc, dim=-1)
+                w = concentration / concentration.sum(dim=-1, keepdim=True)
 
             w = w + eps_weight
             w = w / w.sum()

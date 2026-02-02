@@ -36,7 +36,7 @@ def run_one(
     set_seed(seed)
 
     if data_bundle is None:
-        tickers = ['JPM', 'JNJ', 'XOM', 'PG', 'MSFT']
+        tickers = ['JPM', 'JNJ', 'MSFT', 'PG', 'XOM']
         ycfg = YahooConfig(
             tickers=tickers,
             start_date="2022-01-01",
@@ -54,6 +54,25 @@ def run_one(
         train_covs = train_view.precompute_expanding_cov(diag=True)
     else:
         train_view, val_view, test_view, train_covs = data_bundle
+        try:
+            tickers = list(train_view.parent.cfg.tickers)
+        except Exception:
+            tickers = None
+
+    def _avg_weight_cols(weights, tickers):
+        if not tickers:
+            return {}
+        if not weights:
+            return {f"avg_weight_{t}": np.nan for t in tickers}
+        try:
+            weights_tensor = torch.stack(
+                [w if torch.is_tensor(w) else torch.as_tensor(w) for w in weights],
+                dim=0,
+            )
+        except Exception:
+            return {f"avg_weight_{t}": np.nan for t in tickers}
+        avg_weights = weights_tensor.mean(dim=0).cpu().numpy()
+        return {f"avg_weight_{t}": float(w) for t, w in zip(tickers, avg_weights)}
 
 
     # ---- use the SAME trainer instance across warmup+train ----
@@ -130,6 +149,7 @@ def run_one(
                 "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
                 "discounted_reward": float(np.mean(dr)) if dr else np.nan,
                 "val_sharpe": np.nan,
+                **_avg_weight_cols(None, tickers),
             }
         )
     
@@ -139,7 +159,7 @@ def run_one(
 
     # warmup (optional)
     for epoch in range(100):
-        #break
+        break
         state = None
         tl, pl, vl, kfl, dynl, simpl, simvl, dr = [], [], [], [], [], [], [], []
         for obs, cov in train_view.iter_windows_with_cov(T=cfg.T, stride=cfg.T, covs=train_covs):
@@ -182,6 +202,7 @@ def run_one(
                 "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
                 "discounted_reward": float(np.mean(dr)) if dr else np.nan,
                 "val_sharpe": np.nan,
+                **_avg_weight_cols(None, tickers),
             }
         )
 
@@ -232,6 +253,7 @@ def run_one(
                 "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
                 "discounted_reward": float(np.mean(dr)) if dr else np.nan,
                 "val_sharpe": np.nan,
+                **_avg_weight_cols(None, tickers),
             }
         )
 
@@ -258,6 +280,7 @@ def run_one(
             dr.append(out['return0'])
 
         val_sharpe = np.nan
+        avg_weight_cols = _avg_weight_cols(None, tickers)
         if epoch % cfg.print_every == 0 and epoch != 0:
             print(
                 f"Update:{epoch}"
@@ -273,11 +296,11 @@ def run_one(
             metrics = Trainer.evaluate_full_run(
                 policy, kf, val_view,
                 window_size=cfg.window_size,
-                lam=cfg.lam,
                 device=cfg.device,
                 sample_policy=False,
             )
             val_sharpe = float(metrics["sharpe"])
+            avg_weight_cols = _avg_weight_cols(metrics.get("weights"), tickers)
             print("Validation Sharpe:", val_sharpe)
             if save_best_path and val_sharpe > best_val_sharpe:
                 best_val_sharpe = val_sharpe
@@ -311,6 +334,7 @@ def run_one(
                 "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
                 "discounted_reward": float(np.mean(dr)) if dr else np.nan,
                 "val_sharpe": val_sharpe,
+                **avg_weight_cols,
             }
         )
 
@@ -347,7 +371,6 @@ def run_one(
     metrics = Trainer.evaluate_full_run(
         policy, kf, test_view,
         window_size=cfg.window_size,
-        lam=cfg.lam,
         device=cfg.device,
         sample_policy=False,
     )
@@ -359,6 +382,13 @@ def run_one(
             f"test_std_return: {float(metrics['std_return'])}"
         )
 
+    weights = metrics["weights"]
+    if weights:
+        weights_tensor = torch.stack(weights, dim=0)
+        avg_weights = weights_tensor.mean(dim=0).cpu().numpy()
+    else:
+        avg_weights = None
+
     return {
         "seed": seed,
         "window_size": window_size,
@@ -368,6 +398,8 @@ def run_one(
         "test_mean_return": float(metrics["mean_return"]),
         "test_std_return": float(metrics["std_return"]),
         "test_weights": metrics["weights"],
+        "test_avg_weights": avg_weights,
+        "tickers": tickers,
         "last_return0": float(out["return0"]),
         "best_val_sharpe": float(best_val_sharpe),
         "best_policy_path": save_best_path,

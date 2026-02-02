@@ -12,7 +12,7 @@ class TrainConfig:
     # speed/dev toggles
     episodes_per_batch: int = 1
     use_dyn: bool = False
-    use_kf: bool = True
+    use_kf: bool = False
     print_every: int = 10
 
     # reward shaping
@@ -27,8 +27,8 @@ class TrainConfig:
 
     lr_critic: float = 1e-3
     critic_weight = 1.0
-    use_critic: bool = True
-    use_baseline: bool = True
+    use_critic: bool = False
+    use_baseline: bool = False
 
 
     lr_kf: float = 1e-3
@@ -38,13 +38,13 @@ class TrainConfig:
 
     normalize_adv: bool = False
 
-    dyn_enabled: bool = True
+    dyn_enabled: bool = False
     lr_dyn: float = 1e-4
     dyn_hidden: int = 128
     dyn_weight: float = 1.0
 
     # optional later
-    dyn_use_sim: bool = True
+    dyn_use_sim: bool = False
     dyn_sim_M: int = 5          # number of simulated episodes per real rollout window
     dyn_sim_pl_weight: float = 0.01  # how much to weight sim loss vs real loss
     dyn_sim_vl_weight: float = 1.0

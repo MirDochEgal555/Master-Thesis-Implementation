@@ -113,6 +113,51 @@ def plot_discounted_reward(df: pd.DataFrame, out_dir: Path | None) -> None:
         plt.show()
 
 
+def plot_average_weights(df: pd.DataFrame, out_dir: Path | None) -> None:
+    weight_cols = [col for col in df.columns if col.startswith("avg_weight_")]
+    if not weight_cols:
+        print("No avg_weight_* columns found in CSV.")
+        return
+    weight_df = df.copy()
+    weight_df[weight_cols] = weight_df[weight_cols].apply(pd.to_numeric, errors="coerce")
+    weight_df = weight_df.dropna(subset=weight_cols, how="all")
+    if weight_df.empty:
+        print("Average weight columns are all NaN.")
+        return
+
+    phase_offsets = {}
+    offset = 0
+    for phase in PHASE_ORDER:
+        phase_max = weight_df.loc[weight_df["phase"] == phase, "epoch"].max()
+        if pd.isna(phase_max):
+            continue
+        phase_offsets[phase] = offset
+        offset += int(phase_max) + 1
+    if not phase_offsets:
+        phase_offsets = {None: 0}
+    weight_df["global_step"] = weight_df.apply(
+        lambda row: row["epoch"] + phase_offsets.get(row.get("phase"), 0), axis=1
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for col in weight_cols:
+        series = weight_df[col].astype(float)
+        if series.isna().all():
+            continue
+        label = col.replace("avg_weight_", "")
+        ax.plot(weight_df["global_step"], series, label=label)
+    ax.set_title("Average Weights (Warmups Included)")
+    ax.set_xlabel("Global Step")
+    ax.set_ylabel("Average weight")
+    ax.grid(True, alpha=0.3)
+    ax.legend(ncol=2, fontsize=8)
+    fig.tight_layout()
+    if out_dir:
+        fig.savefig(out_dir / "average_weights.png", dpi=150)
+    else:
+        plt.show()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot learning stats from CSV.")
     parser.add_argument("csv_path", help="Path to learning_stats.csv")
@@ -132,6 +177,7 @@ def main() -> None:
     plot_validation_sharpe(df, out_dir)
     plot_losses_normalized(df, out_dir)
     plot_discounted_reward(df, out_dir)
+    plot_average_weights(df, out_dir)
 
 
 if __name__ == "__main__":

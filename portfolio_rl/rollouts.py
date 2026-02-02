@@ -1,4 +1,4 @@
-import torch, math
+import torch
 
 def discounted_return(rewards: torch.Tensor, gamma: float) -> torch.Tensor:
     T = rewards.shape[0]
@@ -53,12 +53,15 @@ def compute_reward(
 
 
 
-def logistic_normal_log_prob_clr_from_y(y, w, loc, log_std, tau=1.0, eps=1e-8):
-    # y, loc, log_std: (..., K) already zero-sum; w: (..., K)
-    std = torch.exp(log_std)
-    logp_y = -0.5 * (((y - loc) / std)**2 + 2*log_std + math.log(2*math.pi)).sum(-1)
-    # Jacobian (softmax on zero-sum subspace)
-    K = w.shape[-1]
-    logJ = (K - 1) * math.log(tau) - torch.log(w.clamp_min(eps)).sum(-1)
-    return logp_y + logJ
+def dirichlet_log_prob(w, concentration, eps=1e-8):
+    """
+    w: (..., K) on simplex
+    concentration: (..., K) positive
+    """
+    w = w.clamp_min(eps)
+    concentration = concentration.clamp_min(eps)
+    sum_conc = concentration.sum(dim=-1)
+    log_norm = torch.lgamma(sum_conc) - torch.lgamma(concentration).sum(dim=-1)
+    log_kernel = ((concentration - 1.0) * torch.log(w)).sum(dim=-1)
+    return log_norm + log_kernel
 
