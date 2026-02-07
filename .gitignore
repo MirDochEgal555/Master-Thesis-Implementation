@@ -1,0 +1,25 @@
+# Python virtual environments
+Lib/
+Scripts/
+share/
+pyvenv.cfg
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Data/output artifacts
+*.parquet
+*.zip
+*.ckpt
+*.pt
+*.pth
+*.log
+*.tmp
+weights.txt
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

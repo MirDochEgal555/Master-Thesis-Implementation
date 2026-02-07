@@ -1,0 +1,4 @@
+strategy,sharpe,total_return,mean_return,std_return
+equal_weight,1.390288,1.170787,0.0005439076,0.0062104147
+inverse_volatility,1.242944,1.150823,0.0004803271,0.0061345911
+minimum_variance,0.768046,1.092093,0.0002932884,0.0060618878
