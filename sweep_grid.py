@@ -32,26 +32,40 @@ def _parse_value(raw, sample):
 def _run_job(args):
     combo_id, combo, keys, seed, fixed = args
     cfg_kwargs = dict(zip(keys, combo))
+    window_size = int(cfg_kwargs["window_size"])
+    save_best_path = None
+    policy_dir = fixed.get("policy_dir")
+    if policy_dir:
+        save_best_path = os.path.join(policy_dir, f"policy_combo{combo_id}_seed{seed}.pt")
+
+    kf_mode = cfg_kwargs.get("kf_mode", "learned")
+    use_kf = (kf_mode != "none")
+    kf_fixed = (kf_mode == "fixed")
+    dyn_use_sim = bool(cfg_kwargs.get("dyn_use_sim", True))
+    kf_q = float(cfg_kwargs.get("kf_q", 1e-3))
+    kf_r = float(cfg_kwargs.get("kf_r", 1e-3))
+
 
     cfg = TrainConfig(
         device="cpu",
-        T=(fixed["window_size"] + 5),
+        T=(window_size + 5),
         updates=fixed["updates"],
-        window_size=fixed["window_size"],
+        window_size=window_size,
         print_every=999999,
-        use_kf=True,
+        use_kf=use_kf,
         episodes_per_batch=1,
         lam=float(cfg_kwargs["lam"]),
         gamma=0.99,
         dyn_enabled=True,
         use_critic=False,
         kappa_unc=float(cfg_kwargs["kappa_unc"]),
-        dyn_use_sim=True,
+        dyn_use_sim=dyn_use_sim,
         actor_weight=float(cfg_kwargs["actor_weight"]),
         lr_actor=float(cfg_kwargs["lr_actor"]),
         dyn_sim_M=int(cfg_kwargs["dyn_sim_M"]),
         dyn_sim_deterministic=bool(cfg_kwargs["dyn_sim_deterministic"]),
         dyn_sim_pl_weight=float(cfg_kwargs["dyn_sim_pl_weight"]),
+        kf_weight=0.0 if kf_fixed else 1.0,
     )
 
     res = run_one(
@@ -60,13 +74,16 @@ def _run_job(args):
         lam=cfg.lam,
         cfg=cfg,
         verbose=False,
-        save_best_path=None,
+        save_best_path=save_best_path,
         evaluate_best_on_test=False,
         eval_on_validation=True,
         stats_csv_path=None,
         networksize=fixed["networksize"],
         learnrate=cfg.lr_actor,
         print_results=True,
+        kf_fixed=kf_fixed,
+        kf_q=kf_q,
+        kf_r=kf_r,
     )
 
     return {
@@ -78,26 +95,35 @@ def _run_job(args):
         "test_total_return": res.get("test_total_return", float("nan")),
         "test_mean_return": res.get("test_mean_return", float("nan")),
         "test_std_return": res.get("test_std_return", float("nan")),
+        "min_return": res.get("test_max_drawdown", float("nan")),
     }
 
 
 def main():
     # --- fixed settings (edit as needed) ---
-    window_size = 1
+    #window_size = 1
     updates = 1000
     networksize = 128
-    seeds = [0, 1, 2]
+    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     max_workers = min(8, os.cpu_count() or 1)
+    policy_dir = "grid_search_results/policies"
 
     # --- hyperparameter grid ---
     grid = {
+        "window_size": [10],
         "lr_actor": [1e-3],
         "dyn_sim_M": [10],
         "dyn_sim_deterministic": [True],
         "dyn_sim_pl_weight": [0.1],
         "lam": [1.0],
         "actor_weight": [1.0],
-        "kappa_unc": [1.0],
+        "kappa_unc": [0.1],
+        # new ablations
+        "kf_mode": ["learned", "fixed", "none"],
+        "dyn_use_sim": [False],
+        # fixed KF params (only used when kf_mode == "fixed")
+        "kf_q": [0.00022],
+        "kf_r": [0.00015],
     }
 
     keys = list(grid.keys())
@@ -107,15 +133,22 @@ def main():
     combo_seed_vals = {i: [] for i in range(len(combos))}
     existing_settings = set()
     combo_to_id = {combo: i for i, combo in enumerate(combos)}
+    existing_rows = []
+    existing_fieldnames = []
+    needs_header_update = False
 
     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         with open(out_path, "r", newline="") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames:
+                existing_fieldnames = reader.fieldnames
+                if "min_return" not in reader.fieldnames:
+                    needs_header_update = True
                 needed = set(keys + ["seed"])
                 if needed.issubset(reader.fieldnames):
                     samples = {k: grid[k][0] for k in keys}
                     for row in reader:
+                        existing_rows.append(row)
                         try:
                             combo = tuple(_parse_value(row[k], samples[k]) for k in keys)
                             combo_id = combo_to_id.get(combo)
@@ -135,28 +168,35 @@ def main():
                                 combo_seed_vals[combo_id].append(float(row["best_val_sharpe"]))
                             except ValueError:
                                 pass
+                else:
+                    for row in reader:
+                        existing_rows.append(row)
 
-    write_header = not (os.path.exists(out_path) and os.path.getsize(out_path) > 0)
+    file_exists = os.path.exists(out_path) and os.path.getsize(out_path) > 0
+    write_header = (not file_exists) or needs_header_update
     file_mode = "w" if write_header else "a"
     with open(out_path, file_mode, newline="") as f:
         writer = csv.writer(f)
+        header = [
+            "combo_id",
+            *keys,
+            "seed",
+            "best_val_sharpe",
+            "test_sharpe",
+            "test_total_return",
+            "test_mean_return",
+            "test_std_return",
+            "min_return",
+        ]
         if write_header:
-            writer.writerow(
-                [
-                    "combo_id",
-                    *keys,
-                    "seed",
-                    "best_val_sharpe",
-                    "test_sharpe",
-                    "test_total_return",
-                    "test_mean_return",
-                    "test_std_return",
-                ]
-            )
+            writer.writerow(header)
+            if needs_header_update and existing_rows:
+                for row in existing_rows:
+                    writer.writerow([row.get(col, "") for col in header])
 
         combo_summaries = []
         jobs = []
-        fixed = {"window_size": window_size, "updates": updates, "networksize": networksize}
+        fixed = {"updates": updates, "networksize": networksize, "policy_dir": policy_dir}
 
         for combo_id, combo in enumerate(combos):
             for seed in seeds:
@@ -183,6 +223,7 @@ def main():
                             row["test_total_return"],
                             row["test_mean_return"],
                             row["test_std_return"],
+                            row["min_return"],
                         ]
                     )
 

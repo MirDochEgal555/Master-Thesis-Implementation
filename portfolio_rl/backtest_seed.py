@@ -29,6 +29,9 @@ def run_one(
     learnrate: float,
     data_bundle=None,
     print_results=False,
+    kf_fixed=False,
+    kf_q=1e-3,
+    kf_r=1e-3,
 ):
     # one process = one thread (important for parallel speed)
     torch.set_num_threads(1)
@@ -92,7 +95,17 @@ def run_one(
 
     policy = PolicyNet(K=K,hidden=networksize).to(device)
     value = ValueNet(K).to(device)
-    kf = LearnableKalman(dim=K).to(device) if cfg.use_kf else None
+    if cfg.use_kf:
+        if kf_fixed:
+            kf = LearnableKalman(
+                dim=K,
+                Q=kf_q * torch.eye(K),
+                R=kf_r * torch.eye(K),
+            ).to(device)
+        else:
+            kf = LearnableKalman(dim=K).to(device)
+    else:
+        kf = None
     trainer = Trainer(policy, value, kf, cfg)
     stats_rows = []
 
@@ -252,6 +265,7 @@ def run_one(
 
     best_val_sharpe = -np.inf
     best_val_sharpe_epoch = 0
+    best_saved = False
 
     # train
     for epoch in range(cfg.updates):
@@ -306,6 +320,7 @@ def run_one(
                     },
                     save_best_path,
                 )
+                best_saved = True
         stats_rows.append(
             {
                 "phase": "train",
@@ -337,6 +352,22 @@ def run_one(
             mode="a",
             header=not os.path.exists(stats_csv_path),
             index=False,
+        )
+
+    if save_best_path and not best_saved:
+        save_dir = os.path.dirname(save_best_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+        last_epoch = cfg.updates - 1 if cfg.updates > 0 else 0
+        torch.save(
+            {
+                "epoch": last_epoch,
+                "val_sharpe": float(best_val_sharpe),
+                "policy_state_dict": policy.state_dict(),
+                "kf_state_dict": kf.state_dict() if kf is not None else None,
+                "cfg": vars(cfg),
+            },
+            save_best_path,
         )
 
     # evaluate once (test or validation-only)
@@ -379,6 +410,7 @@ def run_one(
         "test_total_return": float(metrics["total_reward"]),
         "test_mean_return": float(metrics["mean_return"]),
         "test_std_return": float(metrics["std_return"]),
+        "test_max_drawdown": float(metrics["max_drawdown"]),
         "test_weights": metrics["weights"],
         "last_return0": float(out["return0"]),
         "best_val_sharpe": float(best_val_sharpe),

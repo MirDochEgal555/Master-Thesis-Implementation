@@ -179,7 +179,15 @@ class Trainer:
             turn_bonus = torch.exp(-0.5 * 3.0 * (turn_ratio - 1.0) ** 2)
             trade_cost = cfg.cost_coef * turn_l1
             # reward
-            r_rl, _balance = compute_reward(w_prev, z_t, cov_used, cfg.lam, kappa_unc=cfg.kappa_unc)
+            unc_matrix = V_t if self.kf is not None else torch.zeros_like(eyeK)
+            r_rl, _balance = compute_reward(
+                w_prev,
+                z_t,
+                cov_used,
+                unc_matrix,
+                lam=cfg.lam,
+                kappa_unc=cfg.kappa_unc,
+            )
             #print(_balance)
             r_t = r_rl - trade_cost + cfg.turn_coef * turn_bonus
             rewards.append(r_t)
@@ -432,12 +440,17 @@ class Trainer:
 
         sharpe = pure.mean() / (pure.std() + 1e-8) * np.sqrt(252)
         cumret = 1 + pure.sum()
+        equity = torch.cumprod(1 + pure, dim=0)
+        running_max = torch.cummax(equity, dim=0).values
+        drawdowns = (equity / running_max) - 1.0
+        max_drawdown = float(drawdowns.min().cpu())
 
         return {
             "total_reward": float(cumret),
             "sharpe": float(sharpe),
             "mean_return": float(pure.mean()),
             "std_return": float(pure.std()),
+            "max_drawdown": max_drawdown,
             "pure_returns": pure.cpu().numpy(),
             "weights": weights,
         }

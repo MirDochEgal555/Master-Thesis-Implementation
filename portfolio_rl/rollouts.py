@@ -14,6 +14,7 @@ def compute_reward(
     weights,
     true_return,
     cov_matrix,
+    unc_matrix,
     lam: float = 0.1,
     scale: float = 200,
     kappa_unc: float = 0.0,        # NEW: coefficient for belief-uncertainty penalty
@@ -33,11 +34,11 @@ def compute_reward(
 
     # --- belief-uncertainty penalty: κ * H(Σ_t) ≈ κ * 0.5 * log det Σ_t ---
     if kappa_unc != 0.0:
-        N = cov_matrix.shape[0]
-        eye = torch.eye(N, device=cov_matrix.device, dtype=cov_matrix.dtype)
-        cov_stable = cov_matrix + 1e-6 * eye
+        N = unc_matrix.shape[0]
+        eye = torch.eye(N, device=unc_matrix.device, dtype=unc_matrix.dtype)
+        unc_stable = unc_matrix + 1e-6 * eye
 
-        sign, logdet = torch.slogdet(cov_stable)
+        sign, logdet = torch.slogdet(unc_stable)
         # handle pathological cases: if sign <= 0, ignore the penalty
         logdet = torch.where(sign > 0, logdet, torch.zeros_like(logdet))
 

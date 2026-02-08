@@ -63,6 +63,7 @@ def simulate_rollouts_from_dynamics(
         cov_prev = eyeK
         eps = 1e-6
         V_t = eyeK.clone() if A is not None else None
+        unc_prev = V_t.clone() if V_t is not None else torch.zeros_like(eyeK)
 
         for t in range(T_sim):
             base_feat = s_t
@@ -77,7 +78,14 @@ def simulate_rollouts_from_dynamics(
             w = (w + 1e-4) / (w.sum(dim=-1, keepdim=True) + 1e-12)
 
             # reward shaping identical style to training (use current state)
-            r_rl, _bal = compute_reward(w_prev, s_t, cov_prev, lam, kappa_unc=kappa_unc)
+            r_rl, _bal = compute_reward(
+                w_prev,
+                s_t,
+                cov_prev,
+                unc_prev,
+                lam=lam,
+                kappa_unc=kappa_unc,
+            )
 
             turn_l1 = (w - w_prev).abs().sum()
             turn_ratio = turn_l1 / (turn_target + 1e-12)
@@ -106,13 +114,19 @@ def simulate_rollouts_from_dynamics(
             pred_var = pred_var.squeeze(0)
             s_next = _sample_next_state(pred_mean, pred_var, deterministic_next_state)
 
+            unc_next = torch.zeros_like(cov_prev)
             if use_model_uncertainty:
-                cov_prev = cov_prev + torch.diag(pred_var + eps)
+                model_unc = torch.diag(pred_var + eps)
+                cov_prev = cov_prev + model_unc
+                unc_next = unc_next + model_unc
 
             if A is not None and Q is not None:
                 V_t = A @ V_t @ A.T + Q
                 V_t = 0.5 * (V_t + V_t.T)
                 cov_prev = cov_prev + V_t
+                unc_next = unc_next + V_t
+
+            unc_prev = unc_next
 
             # update (keep graph for BPTT through model)
             w_prev = w
