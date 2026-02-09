@@ -127,7 +127,7 @@ def run_one(
             simvl.append(out['sim_value_loss'])
             dr.append(out['return0'])
 
-        if epoch % cfg.print_every == 0 and epoch != 0:
+        if epoch % cfg.print_every == 0 and epoch != 0 and verbose:
             print(
                 f"Update:{epoch}"
                 f"Total loss:{np.mean(tl):.5f}"
@@ -179,7 +179,7 @@ def run_one(
             simvl.append(out['sim_value_loss'])
             dr.append(out['return0'])
 
-        if epoch % cfg.print_every == 0 and epoch != 0:
+        if epoch % cfg.print_every == 0 and epoch != 0 and verbose:
             print(
                 f"Update:{epoch}"
                 f"Total loss:{np.mean(tl):.5f}"
@@ -286,17 +286,18 @@ def run_one(
 
         val_sharpe = np.nan
         if epoch % cfg.print_every == 0 and epoch != 0:
-            print(
-                f"Update:{epoch}"
-                f"Total loss:{np.mean(tl):.5f}"
-                f" Policy loss:{np.mean(pl):.5f}"
-                f" Value loss:{np.mean(vl):.5f}"
-                f" KF loss:{np.mean(kfl):.5f}"
-                f" Dynamics loss:{np.mean(dynl):.5f}"
-                f" Policy loss Sim:{np.mean(simpl):.5f}"
-                f" Value loss Sim:{np.mean(simvl):.5f}"
-                f" Discounted Reward:{np.mean(dr):.3f}"
-            )
+            if verbose:
+                print(
+                    f"Update:{epoch}"
+                    f"Total loss:{np.mean(tl):.5f}"
+                    f" Policy loss:{np.mean(pl):.5f}"
+                    f" Value loss:{np.mean(vl):.5f}"
+                    f" KF loss:{np.mean(kfl):.5f}"
+                    f" Dynamics loss:{np.mean(dynl):.5f}"
+                    f" Policy loss Sim:{np.mean(simpl):.5f}"
+                    f" Value loss Sim:{np.mean(simvl):.5f}"
+                    f" Discounted Reward:{np.mean(dr):.3f}"
+                )
             metrics = Trainer.evaluate_full_run(
                 policy, kf, val_view,
                 window_size=cfg.window_size,
@@ -304,7 +305,7 @@ def run_one(
                 sample_policy=False,
             )
             val_sharpe = float(metrics["sharpe"])
-            print("Validation Sharpe:", val_sharpe)
+            if verbose: print("Validation Sharpe:", val_sharpe)
             if save_best_path and val_sharpe > best_val_sharpe:
                 best_val_sharpe = val_sharpe
                 best_val_sharpe_epoch = epoch
