@@ -1,0 +1,1 @@
+w=1 lam=0.1 mean_sharpe=1.310411 std_sharpe=0.091127 n=50

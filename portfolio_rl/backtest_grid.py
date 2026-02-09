@@ -26,6 +26,7 @@ def grid_search(seeds, window_sizes, lambdas, max_workers=4, line_log_path="grid
                     f" cumret={r['test_total_return']:.3f}"
                     f" meanret={r['test_mean_return']:.3f}"
                     f" stdret={r['test_std_return']:.3f}"
+                    f" maxdd={r['test_max_drawdown']:.3f}"
                 )
                 print(line)
                 log_f.write(line + "\n")
@@ -36,7 +37,7 @@ def grid_search(seeds, window_sizes, lambdas, max_workers=4, line_log_path="grid
     agg = {}
     for r in results:
         key = (r["window_size"], r["lam"])
-        agg.setdefault(key, []).append(r["val_sharpe"])
+        agg.setdefault(key, []).append(r["test_sharpe"])
 
     summary = []
     for (w, lam), vals in agg.items():

@@ -24,8 +24,8 @@ def run_one(
     save_best_path=None,
     evaluate_best_on_test=False,
     stats_csv_path=None,
-    networksize: int, 
-    learnrate: float,
+    networksize=32, 
+    learnrate=1e-5,
     data_bundle=None,
 ):
     # one process = one thread (important for parallel speed)
@@ -379,7 +379,8 @@ def run_one(
             f"test_sharpe: {float(metrics['sharpe'])},"
             f"test_total_return: {float(metrics['total_reward'])},"
             f"test_mean_return: {float(metrics['mean_return'])},"
-            f"test_std_return: {float(metrics['std_return'])}"
+            f"test_std_return: {float(metrics['std_return'])},"
+            f"test_max_drawdown: {float(metrics['max_drawdown'])}"
         )
 
     weights = metrics["weights"]
@@ -397,6 +398,7 @@ def run_one(
         "test_total_return": float(metrics["total_reward"]),
         "test_mean_return": float(metrics["mean_return"]),
         "test_std_return": float(metrics["std_return"]),
+        "test_max_drawdown": float(metrics["max_drawdown"]),
         "test_weights": metrics["weights"],
         "test_avg_weights": avg_weights,
         "tickers": tickers,

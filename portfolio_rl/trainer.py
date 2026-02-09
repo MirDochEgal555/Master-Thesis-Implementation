@@ -414,12 +414,18 @@ class Trainer:
 
         sharpe = pure.mean() / (pure.std() + 1e-8) * np.sqrt(252)
         cumret = 1 + pure.sum()
+        pure_np = pure.cpu().numpy()
+        equity_curve = np.cumprod(1.0 + pure_np)
+        running_peak = np.maximum.accumulate(equity_curve)
+        drawdowns = equity_curve / (running_peak + 1e-12) - 1.0
+        max_drawdown = float(-drawdowns.min()) if drawdowns.size else 0.0
 
         return {
             "total_reward": float(cumret),
             "sharpe": float(sharpe),
             "mean_return": float(pure.mean()),
             "std_return": float(pure.std()),
-            "pure_returns": pure.cpu().numpy(),
+            "pure_returns": pure_np,
+            "max_drawdown": max_drawdown,
             "weights": weights,
         }
