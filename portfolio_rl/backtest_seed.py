@@ -266,6 +266,7 @@ def run_one(
     best_val_sharpe = -np.inf
     best_val_sharpe_epoch = 0
     best_saved = False
+    last_epoch = cfg.updates - 1 if cfg.updates > 0 else 0
 
     # train
     for epoch in range(cfg.updates):
@@ -358,7 +359,6 @@ def run_one(
         save_dir = os.path.dirname(save_best_path)
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
-        last_epoch = cfg.updates - 1 if cfg.updates > 0 else 0
         torch.save(
             {
                 "epoch": last_epoch,
@@ -372,6 +372,8 @@ def run_one(
 
     # evaluate once (test or validation-only)
     used_best_policy = False
+    used_policy_epoch = last_epoch
+    used_policy_path = save_best_path if save_best_path else None
     if evaluate_best_on_test and save_best_path and os.path.exists(save_best_path):
         try:
             ckpt = torch.load(save_best_path, map_location=device)
@@ -384,7 +386,9 @@ def run_one(
         if kf is not None and ckpt.get("kf_state_dict") is not None:
             kf.load_state_dict(ckpt["kf_state_dict"])
         used_best_policy = True
-        print("Using policy at epoch:", best_val_sharpe_epoch)
+        used_policy_epoch = int(ckpt.get("epoch", last_epoch))
+        used_policy_path = save_best_path
+        print("Using policy at epoch:", used_policy_epoch)
 
     eval_view = val_view if eval_on_validation else test_view
     metrics = Trainer.evaluate_full_run(
@@ -414,7 +418,10 @@ def run_one(
         "test_weights": metrics["weights"],
         "last_return0": float(out["return0"]),
         "best_val_sharpe": float(best_val_sharpe),
+        "best_val_sharpe_epoch": int(best_val_sharpe_epoch),
         "best_policy_path": save_best_path,
         "used_best_policy": used_best_policy,
+        "used_policy_epoch": int(used_policy_epoch) if used_policy_epoch is not None else None,
+        "used_policy_path": used_policy_path,
         "eval_split": "val" if eval_on_validation else "test",
     }

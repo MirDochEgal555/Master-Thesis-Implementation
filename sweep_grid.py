@@ -44,6 +44,7 @@ def _run_job(args):
     dyn_use_sim = bool(cfg_kwargs.get("dyn_use_sim", True))
     kf_q = float(cfg_kwargs.get("kf_q", 1e-3))
     kf_r = float(cfg_kwargs.get("kf_r", 1e-3))
+    evaluate_best_on_test = bool(cfg_kwargs.get("evaluate_best_on_test", False))
 
 
     cfg = TrainConfig(
@@ -75,8 +76,7 @@ def _run_job(args):
         cfg=cfg,
         verbose=False,
         save_best_path=save_best_path,
-        evaluate_best_on_test=False,
-        eval_on_validation=True,
+        eval_on_validation=False,
         stats_csv_path=None,
         networksize=fixed["networksize"],
         learnrate=cfg.lr_actor,
@@ -84,6 +84,7 @@ def _run_job(args):
         kf_fixed=kf_fixed,
         kf_q=kf_q,
         kf_r=kf_r,
+        evaluate_best_on_test=evaluate_best_on_test,
     )
 
     return {
@@ -91,6 +92,11 @@ def _run_job(args):
         "combo": combo,
         "seed": seed,
         "best_val_sharpe": res.get("best_val_sharpe", float("nan")),
+        "best_val_sharpe_epoch": res.get("best_val_sharpe_epoch"),
+        "best_policy_path": res.get("best_policy_path"),
+        "used_best_policy": res.get("used_best_policy"),
+        "used_policy_epoch": res.get("used_policy_epoch"),
+        "used_policy_path": res.get("used_policy_path"),
         "test_sharpe": res.get("test_sharpe", float("nan")),
         "test_total_return": res.get("test_total_return", float("nan")),
         "test_mean_return": res.get("test_mean_return", float("nan")),
@@ -102,9 +108,9 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 1000
+    updates = 3000
     networksize = 128
-    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    seeds = list(range(20))
     max_workers = min(8, os.cpu_count() or 1)
     policy_dir = "grid_search_results/policies"
 
@@ -119,8 +125,9 @@ def main():
         "actor_weight": [1.0],
         "kappa_unc": [0.1],
         # new ablations
-        "kf_mode": ["learned", "fixed", "none"],
-        "dyn_use_sim": [False],
+        "kf_mode": ["fixed"],
+        "dyn_use_sim": [True],
+        "evaluate_best_on_test": [True, False],
         # fixed KF params (only used when kf_mode == "fixed")
         "kf_q": [0.00022],
         "kf_r": [0.00015],
@@ -142,9 +149,14 @@ def main():
             reader = csv.DictReader(f)
             if reader.fieldnames:
                 existing_fieldnames = reader.fieldnames
-                if "min_return" not in reader.fieldnames:
-                    needs_header_update = True
                 needed = set(keys + ["seed"])
+                if (
+                    "min_return" not in reader.fieldnames
+                    or "used_policy_epoch" not in reader.fieldnames
+                    or "used_policy_path" not in reader.fieldnames
+                    or not needed.issubset(reader.fieldnames)
+                ):
+                    needs_header_update = True
                 if needed.issubset(reader.fieldnames):
                     samples = {k: grid[k][0] for k in keys}
                     for row in reader:
@@ -182,6 +194,11 @@ def main():
             *keys,
             "seed",
             "best_val_sharpe",
+            "best_val_sharpe_epoch",
+            "best_policy_path",
+            "used_best_policy",
+            "used_policy_epoch",
+            "used_policy_path",
             "test_sharpe",
             "test_total_return",
             "test_mean_return",
@@ -219,6 +236,11 @@ def main():
                             *combo,
                             seed,
                             row["best_val_sharpe"],
+                            row["best_val_sharpe_epoch"],
+                            row["best_policy_path"],
+                            row["used_best_policy"],
+                            row["used_policy_epoch"],
+                            row["used_policy_path"],
                             row["test_sharpe"],
                             row["test_total_return"],
                             row["test_mean_return"],

@@ -57,6 +57,10 @@ class TrainingSpec:
     networksize: int | None = None
     learnrate: float | None = None
     eval_every: int | None = None
+    kf_mode: str | None = None  # "learned", "fixed", "none"
+    kf_q: float | None = None
+    kf_r: float | None = None
+    dyn_use_sim: bool | None = None
     cfg_overrides: dict[str, object] = field(default_factory=dict)
     cache_path: str | Path = "returns.parquet"
     data_bundle: object | None = None
@@ -257,7 +261,7 @@ class LearningComparison:
             gamma=0.99,
             dyn_enabled=True,
             use_critic=False,
-            kappa_unc=0.0,
+            kappa_unc=0.1,
             dyn_use_sim=True,
             actor_weight=1.0,
             lr_actor=1e-3,
@@ -272,6 +276,20 @@ class LearningComparison:
 
         if spec.eval_every is not None:
             cfg.print_every = int(spec.eval_every)
+
+        kf_fixed = False
+        if spec.kf_mode is not None:
+            mode = spec.kf_mode.lower().strip()
+            if mode not in {"learned", "fixed", "none"}:
+                raise ValueError("kf_mode must be 'learned', 'fixed', or 'none'.")
+            if mode == "none":
+                cfg.use_kf = False
+            else:
+                cfg.use_kf = True
+                kf_fixed = mode == "fixed"
+
+        if spec.dyn_use_sim is not None:
+            cfg.dyn_use_sim = bool(spec.dyn_use_sim)
 
         if spec.window_size is not None:
             cfg.window_size = int(spec.window_size)
@@ -317,6 +335,9 @@ class LearningComparison:
                 data_bundle=spec.data_bundle,
                 print_results=spec.print_results,
                 cache_path=str(spec.cache_path),
+                kf_fixed=kf_fixed,
+                kf_q=float(spec.kf_q) if spec.kf_q is not None else 1e-3,
+                kf_r=float(spec.kf_r) if spec.kf_r is not None else 1e-3,
             )
             stats_paths.append(stats_path)
 
@@ -507,4 +528,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    specs = {
+        "kf_learned_sim_on": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="learned", dyn_use_sim=True),
+        "kf_fixed_sim_on": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="fixed", kf_q=2.2e-4, kf_r=1.5e-4, dyn_use_sim=True),
+        "kf_none_sim_on": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="none", dyn_use_sim=True),
+        "kf_learned_sim_off": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="learned", dyn_use_sim=False),
+        "kf_fixed_sim_off": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="fixed", kf_q=2.2e-4, kf_r=1.5e-4, dyn_use_sim=False),
+        "kf_none_sim_off": TrainingSpec(seed=1, window_size=10, eval_every=5, kf_mode="none", dyn_use_sim=False),
+    }
+
+    comp = LearningComparison.from_training_specs(specs, use_global_step=True, smooth_window=3)
+    comp.run_training_and_plot(out_dir="learning_runs", out_path="plots/val_sharpe_windows.png")
