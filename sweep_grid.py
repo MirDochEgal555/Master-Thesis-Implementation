@@ -108,7 +108,7 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 1000
+    updates = 2000
     networksize = 128
     seeds = list(range(20))
     max_workers = min(8, os.cpu_count() or 1)
@@ -125,9 +125,9 @@ def main():
         "actor_weight": [1.0],
         "kappa_unc": [0.1],
         # new ablations
-        "kf_mode": ["fixed"],
+        "kf_mode": ["fixed","learned"],
         "dyn_use_sim": [True],
-        "evaluate_best_on_test": [True],
+        "evaluate_best_on_test": [False,True],
         # fixed KF params (only used when kf_mode == "fixed")
         "kf_q": [0.00022],
         "kf_r": [0.00015],
