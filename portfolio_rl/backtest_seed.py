@@ -404,7 +404,8 @@ def run_one(
             f"{split_label}_sharpe: {float(metrics['sharpe'])},"
             f"{split_label}_total_return: {float(metrics['total_reward'])},"
             f"{split_label}_mean_return: {float(metrics['mean_return'])},"
-            f"{split_label}_std_return: {float(metrics['std_return'])}"
+            f"{split_label}_std_return: {float(metrics['std_return'])},"
+            f"{split_label}_max_drawdown: {float(metrics['max_drawdown'])}"
         )
 
     return {
