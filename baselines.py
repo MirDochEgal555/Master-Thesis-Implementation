@@ -15,6 +15,7 @@ class BaselineMetrics:
     std_return: float
     pure_returns: np.ndarray
     weights: Optional[Iterable[np.ndarray]] = None
+    max_drawdown: float = 0.0
 
 
 class BaselinePortfolioEvaluator:
@@ -155,19 +156,25 @@ class BaselinePortfolioEvaluator:
         pure: np.ndarray,
         weights: Optional[Iterable[np.ndarray]],
     ) -> BaselineMetrics:
+        pure_np = np.asarray(pure, dtype=np.float32)
         pure_t = torch.as_tensor(pure, dtype=torch.float32)
         mean = float(pure_t.mean())
         std = float(pure_t.std() + 1e-8)
         sharpe = mean / std * np.sqrt(self.annualization)
         total_reward = float(1.0 + pure_t.sum())
+        equity_curve = np.cumprod(1.0 + pure_np)
+        running_peak = np.maximum.accumulate(equity_curve)
+        drawdowns = equity_curve / (running_peak + 1e-12) - 1.0
+        max_drawdown = float(-drawdowns.min()) if drawdowns.size else 0.0
 
         return BaselineMetrics(
             total_reward=total_reward,
             sharpe=float(sharpe),
             mean_return=mean,
             std_return=float(std),
-            pure_returns=pure,
+            pure_returns=pure_np,
             weights=weights,
+            max_drawdown=max_drawdown,
         )
 
     @staticmethod
@@ -225,7 +232,7 @@ if __name__ == "__main__":
     def _write_metrics_csv(path: Path, split_results):
         with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["strategy", "sharpe", "total_return", "mean_return", "std_return"])
+            writer.writerow(["strategy", "sharpe", "total_return", "mean_return", "std_return", "max_drawdown"])
             for key, metrics in split_results.items():
                 writer.writerow([
                     key,
@@ -233,6 +240,7 @@ if __name__ == "__main__":
                     f"{metrics.total_reward:.6f}",
                     f"{metrics.mean_return:.10f}",
                     f"{metrics.std_return:.10f}",
+                    f"{metrics.max_drawdown:.10f}",
                 ])
 
     def _write_weights_csv(path: Path, dates, weights, tickers_list):
@@ -255,7 +263,8 @@ if __name__ == "__main__":
                 f"{key}: sharpe={metrics.sharpe:.3f}, "
                 f"total_return={metrics.total_reward:.3f}, "
                 f"mean={metrics.mean_return:.6f}, "
-                f"std={metrics.std_return:.6f}"
+                f"std={metrics.std_return:.6f}, "
+                f"maxdd={metrics.max_drawdown:.6f}"
             )
 
     _print_split("val", results["val"])
