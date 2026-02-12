@@ -1,0 +1,224 @@
+% Suggested inclusion in main thesis file:
+% \appendix
+% \input{appendix_reproducibility_and_implementation_details}
+
+\chapter{Reproducibility and Implementation Details}
+\label{app:reproducibility}
+
+This appendix documents the implementation and experiment protocol used in the
+repository \texttt{Master-Thesis-Implementation}. The goal is to make each
+reported result reproducible from source code, configuration defaults, and
+generated artifacts.
+
+\section{Codebase and Entry Points}
+
+Experiments are organized around the following entry scripts:
+\begin{itemize}
+    \item \texttt{main.py}: single-run training and backtest.
+    \item \texttt{run\_grid\_search.py}: parallel grid search over seeds and hyperparameters.
+    \item \texttt{run\_backtest\_grid.py}: parallel backtest grid over seeds.
+    \item \texttt{sweep\_grid.py}: extended sweep utility with incremental CSV logging.
+    \item \texttt{baselines.py}: baseline portfolio strategies.
+    \item \texttt{grid\_search\_report.py}: parsing and aggregation of line logs.
+    \item \texttt{plot\_learning\_stats.py}, \texttt{learning\_comparison.py}: plotting utilities.
+\end{itemize}
+
+Core logic is implemented in the \texttt{portfolio\_rl/} package:
+data loading, model definitions, Kalman filtering, dynamics model, rollouts,
+training, and evaluation.
+
+\section{Software Environment}
+
+\subsection{Dependencies}
+
+All Python dependencies are pinned in \texttt{requirements.txt}. Key packages
+used in experiments are:
+\texttt{torch}, \texttt{numpy}, \texttt{pandas}, \texttt{scipy},
+\texttt{matplotlib}, \texttt{yfinance}, and \texttt{pyarrow}.
+
+\subsection{Environment Setup}
+
+\begin{verbatim}
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+# macOS/Linux
+source .venv/bin/activate
+pip install -r requirements.txt
+\end{verbatim}
+
+\section{Data, Universe, and Splits}
+
+Data is downloaded with \texttt{yfinance} through
+\texttt{portfolio\_rl.data.YahooReturnsDataset}. Price data is converted to
+daily simple returns via percentage change and cached to
+\texttt{returns.parquet}.
+
+\begin{itemize}
+    \item Asset universe (all default run scripts): \{MSFT, JPM, JNJ, XOM, PG\}.
+    \item Date range: 2022-01-01 to 2024-12-31.
+    \item Price field: \texttt{Close}.
+    \item Train/validation/test split:
+    \begin{itemize}
+        \item train: dates $\le$ 2023-03-24
+        \item validation: 2023-03-25 to 2023-09-30
+        \item test: dates $\ge$ 2023-10-01
+    \end{itemize}
+\end{itemize}
+
+Expanding covariance matrices are computed per split with optional diagonal
+projection for training.
+
+\section{Model and Training Implementation}
+
+\subsection{Policy, Value, and Dynamics Networks}
+
+\begin{itemize}
+    \item Policy network (\texttt{PolicyNet}): MLP with two hidden layers and
+    ReLU activations, outputting logits for a softmax portfolio.
+    \item Value network (\texttt{ValueNet}): MLP with two hidden layers and a
+    scalar output.
+    \item Dynamics model (\texttt{DynamicsModel}): MLP on concatenated
+    state-action pairs, predicting Gaussian mean and diagonal variance of the
+    next state.
+\end{itemize}
+
+The hidden width is controlled by script-level settings (e.g.,
+\texttt{networksize} in \texttt{main.py} and \texttt{run\_grid\_search.py}).
+
+\subsection{Kalman Filter}
+
+The filter implementation (\texttt{LearnableKalman}) uses:
+\begin{itemize}
+    \item fixed transition matrix $A = I$;
+    \item diagonal process and measurement noise ($Q$, $R$);
+    \item either learned log-diagonal parameters or fixed values provided in
+    ablations.
+\end{itemize}
+
+\subsection{Reward and Objective}
+
+At each step, the Markowitz-style component is:
+\[
+r^{\text{mark}}_t
+= w_{t-1}^\top z_t
+- \lambda \, w_{t-1}^\top \Sigma_t w_{t-1}.
+\]
+
+Optionally, uncertainty, turnover cost, and turnover-shaping terms are added:
+\[
+r_t
+= r^{\text{mark}}_t
+- \kappa_{\text{unc}} \cdot \tfrac{1}{2}\log\det(\Sigma^{\text{unc}}_t)
+- c \lVert w_t - w_{t-1} \rVert_1
++ \beta \exp\!\left(-\tfrac{3}{2}
+\left(\frac{\lVert w_t - w_{t-1} \rVert_1}{\tau} - 1\right)^2\right).
+\]
+
+Training combines actor, critic, Kalman, dynamics, and simulated policy losses
+with scalar weights from \texttt{TrainConfig}.
+
+\subsection{Training Phases}
+
+The main training loop in \texttt{portfolio\_rl/backtest\_seed.py} uses:
+\begin{itemize}
+    \item 100 epochs KF warmup (\texttt{warmup\_kf}),
+    \item 100 epochs dynamics warmup (\texttt{warmup\_dyn}),
+    \item policy training for \texttt{cfg.updates} epochs (\texttt{train}).
+\end{itemize}
+
+Windows are iterated with
+\texttt{T = window\_size + 5} and \texttt{stride = T}. Validation Sharpe is
+evaluated periodically using \texttt{cfg.print\_every}.
+
+\section{Evaluation Protocol}
+
+The full-run evaluator computes portfolio returns from lagged weights and
+reports:
+\begin{itemize}
+    \item Sharpe ratio:
+    $\text{Sharpe} = \frac{\bar{r}}{s_r + 10^{-8}}\sqrt{252}$,
+    \item total return proxy: $1 + \sum_t r_t$,
+    \item mean and standard deviation of per-step returns,
+    \item maximum drawdown from cumulative equity.
+\end{itemize}
+
+During evaluation, policy output is converted to long-only weights via softmax,
+with a small $\epsilon$-smoothing and renormalization step.
+
+\section{Determinism and Parallel Execution}
+
+For each run, seeds are set for Python, NumPy, and PyTorch using
+\texttt{set\_seed(seed)}. Parallel workers enforce one-thread execution via:
+\texttt{torch.set\_num\_threads(1)},
+\texttt{OMP\_NUM\_THREADS=1}, and
+\texttt{MKL\_NUM\_THREADS=1}.
+
+In spite of seed control, exact bitwise reproducibility is not guaranteed
+across machines or library versions because of floating-point and backend
+differences.
+
+\section{Default Script Configurations}
+
+The defaults currently in the repository are:
+\begin{itemize}
+    \item \texttt{main.py}: single run (seed 0), \texttt{window\_size=1},
+    \texttt{lam=10}, \texttt{networksize=128}, \texttt{learnrate=1e-5},
+    \texttt{updates=1500}, with optional best-checkpoint saving.
+    \item \texttt{run\_grid\_search.py}: seeds 0--9, currently configured with
+    one-point grids for window size, lambda, network size, and learning rate.
+    \item \texttt{run\_backtest\_grid.py}: seeds 0--20, currently configured
+    with one-point grids for window size and lambda.
+    \item \texttt{sweep\_grid.py}: configurable wider search with append-safe
+    CSV logging in \texttt{sweep\_results.csv}.
+\end{itemize}
+
+These scripts are intentionally parameterized directly in code. Reproducing
+specific thesis figures should therefore use the exact committed values from
+the corresponding experiment revision.
+
+\section{Artifacts and Result Files}
+
+Typical generated files are:
+\begin{itemize}
+    \item \texttt{returns.parquet}: cached returns data.
+    \item \texttt{learning\_stats\_kf.csv}: per-epoch training statistics.
+    \item \texttt{grid\_search\_lines.txt}: per-job grid log.
+    \item \texttt{grid\_search\_summary.txt}: aggregated grid summary.
+    \item \texttt{backtest\_grid.txt}: aggregated backtest summary.
+    \item \texttt{weights.txt}: latest saved test weights.
+    \item \texttt{grid\_search\_raw.csv}, \texttt{grid\_search\_seed\_avg.csv},
+    \texttt{grid\_search\_lambda\_avg.csv},
+    \texttt{grid\_search\_window\_avg.csv},
+    \texttt{grid\_search\_networksize\_avg.csv},
+    \texttt{grid\_search\_learnrate\_avg.csv}.
+\end{itemize}
+
+The report CSVs are produced by:
+\begin{verbatim}
+python grid_search_report.py
+\end{verbatim}
+
+\section{Minimal Reproduction Procedure}
+
+\begin{enumerate}
+    \item Create and activate a clean Python environment.
+    \item Install dependencies from \texttt{requirements.txt}.
+    \item Run one of:
+    \begin{verbatim}
+python main.py
+python run_grid_search.py
+python run_backtest_grid.py
+\end{verbatim}
+    \item For grid-search post-processing:
+    \begin{verbatim}
+python grid_search_report.py
+\end{verbatim}
+    \item For plots:
+    \begin{verbatim}
+python plot_learning_stats.py learning_stats_kf.csv --out-dir .
+\end{verbatim}
+\end{enumerate}
+
+This workflow reproduces the full training, evaluation, and artifact-generation
+pipeline implemented in the repository.
