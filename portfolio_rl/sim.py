@@ -1,13 +1,36 @@
 # portfolio_rl/sim.py
 import torch
-from .rollouts import discounted_return, compute_reward
-from .features import RollingMean
+from .rollouts import discounted_return
 
 def _sample_next_state(pred_mean, pred_var, deterministic: bool):
     if deterministic:
         return pred_mean
     eps = torch.randn_like(pred_mean)
     return pred_mean + torch.sqrt(pred_var + 1e-8) * eps
+
+
+def _compute_reward_batched(
+    weights: torch.Tensor,       # [B, K]
+    true_return: torch.Tensor,   # [B, K]
+    cov_matrix: torch.Tensor,    # [B, K, K]
+    unc_matrix: torch.Tensor,    # [B, K, K]
+    lam: float,
+    kappa_unc: float,
+):
+    rp = (weights * true_return).sum(dim=-1)
+    risk = torch.einsum("bi,bij,bj->b", weights, cov_matrix, weights)
+    reward = rp - lam * risk
+
+    if kappa_unc != 0.0:
+        K = unc_matrix.shape[-1]
+        eye = torch.eye(K, device=unc_matrix.device, dtype=unc_matrix.dtype).unsqueeze(0)
+        unc_sym = 0.5 * (unc_matrix + unc_matrix.transpose(-1, -2))
+        unc_stable = unc_sym + 1e-6 * eye
+        sign, logdet = torch.linalg.slogdet(unc_stable)
+        logdet = torch.where(sign > 0, logdet, torch.zeros_like(logdet))
+        reward = reward - kappa_unc * (0.5 * logdet)
+
+    return reward
 
 
 def simulate_rollouts_from_dynamics(
@@ -29,115 +52,129 @@ def simulate_rollouts_from_dynamics(
     roll_detach: bool = True,
     use_model_uncertainty: bool = True,
     use_kf_uncertainty: bool = True,
+    compute_values: bool = True,
 ):
     """
-    Returns lists of per-episode tensors:
-      returns: list of [T_sim]
-      values:  list of [T_sim]
+    Vectorized simulation over B trajectories.
+    Returns:
+      returns: [B, T_sim]
+      values:  [B, T_sim] or None if compute_values=False
     """
     device = init_states.device
     B, K = init_states.shape
 
-    sim_returns = []
-    sim_values = []
-
     eyeK = torch.eye(K, device=device)
+    eyeB = eyeK.unsqueeze(0).expand(B, -1, -1)
+    eps = 1e-6
 
     A = kf.A if (kf is not None and use_kf_uncertainty) else None
     Q = kf.Q if (kf is not None and use_kf_uncertainty) else None
+    # Vectorized rollout state over B trajectories.
+    s_t = init_states
+    w_prev = torch.full((B, K), 1.0 / K, device=device)
+    mean = torch.zeros(B, K, device=device)
+    M2 = torch.zeros(B, K, K, device=device)
+    cov_prev = eyeB.clone()
 
-    for b in range(B):
-        # buffers (lists preserve autograd)
-        vals = []
-        rews = []
+    V_t = eyeK.clone() if A is not None else None
+    unc_prev = eyeB.clone() if V_t is not None else torch.zeros_like(eyeB)
 
-        # "state" here is the KF mean-like vector (K,)
-        s_t = init_states[b]
-        roll = RollingMean(window_size, K, device) if use_roll_features else None
+    if use_roll_features:
+        roll_buf = torch.zeros(B, window_size, K, device=device)
+        roll_sum = torch.zeros(B, K, device=device)
+        roll_len = 0
+        roll_i = 0
 
-        # prev portfolio
-        w_prev = torch.full((K,), 1.0 / K, device=device)
-        mean = torch.zeros(K, device=device)
-        M2 = torch.zeros(K, K, device=device)
-        n = 0
-        cov_prev = eyeK
-        eps = 1e-6
-        V_t = eyeK.clone() if A is not None else None
-        unc_prev = V_t.clone() if V_t is not None else torch.zeros_like(eyeK)
+    vals = []
+    rews = []
+    n = 0
 
-        for t in range(T_sim):
-            base_feat = s_t
-            feat = roll.update(base_feat, detach=roll_detach) if roll is not None else base_feat
-            # critic
-            v_pred = value(feat)
-            vals.append(v_pred.squeeze())
+    if compute_values and value is None:
+        raise ValueError("value network is required when compute_values=True")
 
-            # deterministic policy (same as training)
-            logits = policy(feat)
-            w = torch.softmax(logits, dim=-1)
-            w = (w + 1e-4) / (w.sum(dim=-1, keepdim=True) + 1e-12)
-
-            # reward shaping identical style to training (use current state)
-            r_rl, _bal = compute_reward(
-                w_prev,
-                s_t,
-                cov_prev,
-                unc_prev,
-                lam=lam,
-                kappa_unc=kappa_unc,
-            )
-
-            turn_l1 = (w - w_prev).abs().sum()
-            turn_ratio = turn_l1 / (turn_target + 1e-12)
-            turn_bonus = torch.exp(-0.5 * 3.0 * (turn_ratio - 1.0) ** 2)
-            trade_cost = cost_coef * turn_l1
-
-            r_t = r_rl - trade_cost + turn_coef * turn_bonus
-            rews.append(r_t)
-
-            # update empirical covariance with current return
-            n += 1
-            delta = s_t - mean
-            mean = mean + delta / n
-            delta2 = s_t - mean
-            M2 = M2 + torch.outer(delta, delta2)
-
-            if n >= 2:
-                cov_prev = M2 / (n - 1)
+    for _ in range(T_sim):
+        if use_roll_features:
+            x = s_t.detach() if roll_detach else s_t
+            if roll_len < window_size:
+                roll_buf[:, roll_i] = x
+                roll_sum = roll_sum + x
+                roll_len += 1
             else:
-                cov_prev = eyeK
-            cov_prev = cov_prev + eps * eyeK
+                roll_sum = roll_sum + x - roll_buf[:, roll_i]
+                roll_buf[:, roll_i] = x
+            roll_i = (roll_i + 1) % window_size
+            feat = roll_sum / roll_len
+        else:
+            feat = s_t
 
-            # ----- dynamics step: s_{t+1} ~ N(mu, var) given (s_t, w) -----
-            pred_mean, pred_var = dyn_model(s_t.unsqueeze(0), w.unsqueeze(0))  # [1,K]
-            pred_mean = pred_mean.squeeze(0)
-            pred_var = pred_var.squeeze(0)
-            s_next = _sample_next_state(pred_mean, pred_var, deterministic_next_state)
+        # critic and policy (batched)
+        if compute_values:
+            v_pred = value(feat)             # [B]
+        logits = policy(feat)                # [B, K]
+        w = torch.softmax(logits, dim=-1)
+        w = (w + 1e-4) / (w.sum(dim=-1, keepdim=True) + 1e-12)
 
-            unc_next = torch.zeros_like(cov_prev)
-            if use_model_uncertainty:
-                model_unc = torch.diag(pred_var + eps)
-                cov_prev = cov_prev + model_unc
-                unc_next = unc_next + model_unc
+        r_rl = _compute_reward_batched(
+            w_prev,
+            s_t,
+            cov_prev,
+            unc_prev,
+            lam=lam,
+            kappa_unc=kappa_unc,
+        )
 
-            if A is not None and Q is not None:
-                V_t = A @ V_t @ A.T + Q
-                V_t = 0.5 * (V_t + V_t.T)
-                cov_prev = cov_prev + V_t
-                unc_next = unc_next + V_t
+        turn_l1 = (w - w_prev).abs().sum(dim=-1)
+        turn_ratio = turn_l1 / (turn_target + 1e-12)
+        turn_bonus = torch.exp(-0.5 * 3.0 * (turn_ratio - 1.0) ** 2)
+        trade_cost = cost_coef * turn_l1
+        r_t = r_rl - trade_cost + turn_coef * turn_bonus
 
-            unc_prev = unc_next
+        if compute_values:
+            vals.append(v_pred)
+        rews.append(r_t)
 
-            # update (keep graph for BPTT through model)
-            w_prev = w
-            s_t = s_next
-    
+        # update empirical covariance with current return (batched Welford)
+        n += 1
+        delta = s_t - mean
+        mean = mean + delta / n
+        delta2 = s_t - mean
+        M2 = M2 + delta.unsqueeze(-1) * delta2.unsqueeze(-2)
 
-        vals = torch.stack(vals)
-        rews = torch.stack(rews)
-        rets = discounted_return(rews, gamma)
+        if n >= 2:
+            cov_prev = M2 / (n - 1)
+        else:
+            cov_prev = eyeB.clone()
+        cov_prev = cov_prev + eps * eyeB
 
-        sim_returns.append(rets)
-        sim_values.append(vals)
+        # ----- dynamics step: s_{t+1} ~ N(mu, var) given s_t -----
+        pred_mean, pred_var = dyn_model(s_t)  # [B, K]
+        s_next = _sample_next_state(pred_mean, pred_var, deterministic_next_state)
 
-    return sim_returns, sim_values
+        unc_next = torch.zeros_like(cov_prev)
+        if use_model_uncertainty:
+            model_unc = torch.diag_embed(pred_var + eps)  # [B, K, K]
+            cov_prev = cov_prev + model_unc
+            unc_next = unc_next + model_unc
+
+        if A is not None and Q is not None:
+            V_t = A @ V_t @ A.T + Q
+            V_t = 0.5 * (V_t + V_t.T)
+            V_batch = V_t.unsqueeze(0)
+            cov_prev = cov_prev + V_batch
+            unc_next = unc_next + V_batch
+
+        unc_prev = unc_next
+
+        # keep graph for BPTT through model
+        w_prev = w
+        s_t = s_next
+
+    rews_t = torch.stack(rews, dim=0)      # [T_sim, B]
+    rets_t = discounted_return(rews_t, gamma)
+
+    vals_out = None
+    if compute_values:
+        vals_t = torch.stack(vals, dim=0)  # [T_sim, B]
+        vals_out = vals_t.transpose(0, 1)
+
+    return rets_t.transpose(0, 1), vals_out

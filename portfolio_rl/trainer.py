@@ -66,8 +66,10 @@ class Trainer:
             m_t = None
             V_t = eyeK
 
+        use_critic = self.opt_critic is not None
+
         # rollout buffers (lists preserve autograd)
-        values = []
+        values = [] if use_critic else None
         rewards = []
 
         # ---- portfolio state carry ----
@@ -93,11 +95,9 @@ class Trainer:
         kf_nll_terms = []
 
         dyn_states = []
-        dyn_actions = []
         dyn_targets = []
 
         prev_state = None
-        prev_action = None
 
         real_state_pool = []
         logits_last = None
@@ -152,8 +152,9 @@ class Trainer:
 
 
             # ----- value -----
-            v_pred = self.value(feat)
-            values.append(v_pred)
+            if use_critic:
+                v_pred = self.value(feat)
+                values.append(v_pred)
 
             # ----- deterministic policy -----
             logits = self.policy(feat)
@@ -164,13 +165,11 @@ class Trainer:
             # state for dynamics
             curr_state = (m_t if self.kf is not None else z_t).detach()
 
-            if prev_state is not None and prev_action is not None and self.opt_dyn is not None:
+            if prev_state is not None and self.opt_dyn is not None:
                 dyn_states.append(prev_state)
-                dyn_actions.append(prev_action)
                 dyn_targets.append(curr_state)
 
             prev_state = curr_state
-            prev_action = w.detach()
 
 
             # turnover shaping + cost
@@ -197,24 +196,27 @@ class Trainer:
             if covs is None:
                 cov_prev = cov_full.detach()
 
-        values = torch.stack(values)
         rewards = torch.stack(rewards)
         returns = discounted_return(rewards, cfg.gamma)
 
         # losses
         policy_loss = -returns.mean() if not warmupdyn and not warmupcrit and not warmupkf else torch.tensor(0.0, device=device)
-        value_loss = 0.5 * (returns.detach() - values).pow(2).mean() if self.opt_critic is not None and True else torch.tensor(0.0, device=device)
+        if use_critic:
+            values_t = torch.stack(values)
+            value_loss = 0.5 * (returns.detach() - values_t).pow(2).mean()
+        else:
+            value_loss = torch.tensor(0.0, device=device)
 
         kf_loss = torch.stack(kf_nll_terms).mean() if (self.opt_kf is not None and len(kf_nll_terms) > 0 and True) else torch.tensor(0.0, device=device)
 
         dyn_loss = torch.tensor(0.0, device=device)
+        in_warmup = warmupdyn or warmupcrit or warmupkf
 
         if self.opt_dyn is not None and len(dyn_states) > 0:
             states  = torch.stack(dyn_states, dim=0)   # [N, K]
-            actions = torch.stack(dyn_actions, dim=0)  # [N, K]
             targets = torch.stack(dyn_targets, dim=0)  # [N, K]
 
-            pred_mean, pred_var = self.dyn(states, actions)
+            pred_mean, pred_var = self.dyn(states)
             nll = gaussian_nll(targets, pred_mean, pred_var).sum(dim=-1).mean()
             train_dyn = warmupdyn or cfg.dyn_train_during_policy
             dyn_loss = nll if train_dyn else torch.tensor(0.0, device=device)
@@ -222,16 +224,17 @@ class Trainer:
         sim_policy_loss = torch.tensor(0.0, device=device)
         sim_value_loss = torch.tensor(0.0, device=device)
 
-        if (self.opt_dyn is not None) and cfg.dyn_use_sim and len(real_state_pool) > 0:
+        if (self.opt_dyn is not None) and cfg.dyn_use_sim and (not in_warmup) and len(real_state_pool) > 0:
             pool = torch.stack(real_state_pool, dim=0)  # [T, K]
             M = cfg.dyn_sim_M  # e.g. 50
 
             idx = torch.randint(0, pool.shape[0], (M,), device=device)
             init_states = pool[idx]                     # [M, K]
+            compute_sim_values = use_critic
 
-            sim_returns, sim_values = simulate_rollouts_from_dynamics(
+            sim_returns_t, _sim_values_t = simulate_rollouts_from_dynamics(
                 policy=self.policy,
-                value=self.value,
+                value=self.value if compute_sim_values else None,
                 dyn_model=self.dyn,
                 kf=self.kf,
                 init_states=init_states,
@@ -248,13 +251,11 @@ class Trainer:
                 roll_detach=cfg.dyn_sim_roll_detach,
                 use_model_uncertainty=cfg.dyn_sim_use_model_uncertainty,
                 use_kf_uncertainty=cfg.dyn_sim_use_kf_uncertainty,
+                compute_values=compute_sim_values,
             )
 
-            sim_returns_t = torch.stack(sim_returns, dim=0)  # [M, T]
-            sim_values_t  = torch.stack(sim_values, dim=0)   # [M, T]
-
-            sim_policy_loss = -sim_returns_t.mean() if not warmupdyn and not warmupkf else torch.tensor(0.0)
-            sim_value_loss  = torch.tensor(0.0)  # keep critic update separate from sim by default
+            sim_policy_loss = -sim_returns_t.mean()
+            sim_value_loss  = torch.tensor(0.0, device=device)  # keep critic update separate from sim by default
 
 
         total_loss = (
@@ -309,7 +310,8 @@ class Trainer:
 
         
         torch.nn.utils.clip_grad_norm_(self.policy.parameters(), cfg.max_grad_norm_act)
-        torch.nn.utils.clip_grad_norm_(self.value.parameters(), cfg.max_grad_norm_crit)
+        if use_critic:
+            torch.nn.utils.clip_grad_norm_(self.value.parameters(), cfg.max_grad_norm_crit)
         if self.opt_kf is not None:
             torch.nn.utils.clip_grad_norm_(self.kf.parameters(), 10.0)
 
@@ -358,6 +360,7 @@ class Trainer:
         sample_policy=False,    # <- set True to match notebook stochastic behavior
         eps_weight=1e-4,
         window_size=10,
+        return_weights: bool = True,
     ):
         policy.eval()
         if kalman_filter is not None:
@@ -381,9 +384,8 @@ class Trainer:
             V_t = eyeK.clone()
             I = eyeK
 
-        rewards = torch.empty(N, device=device)
         pure = torch.empty(N, device=device)
-        weights = []
+        weights = [] if return_weights else None
 
         roll = RollingMean(window_size, K, device)
 
@@ -433,7 +435,8 @@ class Trainer:
             w = w / w.sum()
 
             pure[t] = torch.dot(w_prev, z_t)
-            weights.append(w.detach().cpu())
+            if return_weights:
+                weights.append(w.detach().cpu())
 
             w_prev = w
             cov_prev = cov_full

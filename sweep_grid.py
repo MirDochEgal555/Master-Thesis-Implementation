@@ -45,6 +45,8 @@ def _run_job(args):
     kf_q = float(cfg_kwargs.get("kf_q", 1e-3))
     kf_r = float(cfg_kwargs.get("kf_r", 1e-3))
     evaluate_best_on_test = bool(cfg_kwargs.get("evaluate_best_on_test", False))
+    if save_best_path is None:
+        evaluate_best_on_test = False
 
 
     cfg = TrainConfig(
@@ -85,6 +87,9 @@ def _run_job(args):
         kf_q=kf_q,
         kf_r=kf_r,
         evaluate_best_on_test=evaluate_best_on_test,
+        warmup_kf_epochs=fixed["warmup_kf_epochs"],
+        warmup_dyn_epochs=fixed["warmup_dyn_epochs"],
+        return_weights=False,
     )
 
     return {
@@ -108,11 +113,15 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 3000
+    updates = 1000
+    warmup_kf_epochs = 25
+    warmup_dyn_epochs = 25
     networksize = 128
     seeds = list(range(50))
     max_workers = min(8, os.cpu_count() or 1)
-    policy_dir = "grid_search_results/policies"
+    save_policies = False
+    policy_dir = "grid_search_results/policies" if save_policies else None
+    flush_every = 25
 
     # --- hyperparameter grid ---
     grid = {
@@ -121,13 +130,13 @@ def main():
         "dyn_sim_M": [10],
         "dyn_sim_deterministic": [True],
         "dyn_sim_pl_weight": [0.1],
-        "lam": [1.0, 10.0, 20.0],
+        "lam": [1.0],
         "actor_weight": [1.0],
         "kappa_unc": [0.1],
         # new ablations
         "kf_mode": ["learned"],
         "dyn_use_sim": [True],
-        "evaluate_best_on_test": [True],
+        "evaluate_best_on_test": [False],
         # fixed KF params (only used when kf_mode == "fixed")
         "kf_q": [0.00022],
         "kf_r": [0.00015],
@@ -213,7 +222,14 @@ def main():
 
         combo_summaries = []
         jobs = []
-        fixed = {"updates": updates, "networksize": networksize, "policy_dir": policy_dir}
+        fixed = {
+            "updates": updates,
+            "warmup_kf_epochs": warmup_kf_epochs,
+            "warmup_dyn_epochs": warmup_dyn_epochs,
+            "networksize": networksize,
+            "policy_dir": policy_dir,
+        }
+        rows_since_flush = 0
 
         for combo_id, combo in enumerate(combos):
             for seed in seeds:
@@ -252,10 +268,14 @@ def main():
                             row["min_return"],
                         ]
                     )
-                    f.flush()
-                    os.fsync(f.fileno())
+                    rows_since_flush += 1
+                    if rows_since_flush >= flush_every:
+                        f.flush()
+                        rows_since_flush = 0
 
                     combo_seed_vals[combo_id].append(row["best_val_sharpe"])
+                if rows_since_flush > 0:
+                    f.flush()
 
         for combo_id, combo in enumerate(combos):
             seed_rows = combo_seed_vals.get(combo_id, [])

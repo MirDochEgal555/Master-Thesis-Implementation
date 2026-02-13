@@ -12,6 +12,83 @@ from .trainer import Trainer
 from .data import YahooConfig, YahooReturnsDataset
 from .utils import set_seed
 
+DEFAULT_TICKERS = ("MSFT", "JPM", "JNJ", "XOM", "PG")
+DEFAULT_START_DATE = "2022-01-01"
+DEFAULT_END_DATE = "2024-12-31"
+DEFAULT_PRICE_FIELD = "Close"
+DEFAULT_TRAIN_END = "2023-03-24"
+DEFAULT_VAL_END = "2023-09-30"
+
+# Per-process cache (one cache per ProcessPool worker).
+_WORKER_DATA_CACHE = {}
+
+
+def _bundle_cache_key(
+    *,
+    cache_path,
+    tickers,
+    start_date,
+    end_date,
+    price_field,
+    train_end,
+    val_end,
+    cov_diag,
+):
+    cache_path_abs = os.path.abspath(cache_path) if cache_path is not None else None
+    return (
+        cache_path_abs,
+        tuple(tickers),
+        start_date,
+        end_date,
+        price_field,
+        train_end,
+        val_end,
+        bool(cov_diag),
+    )
+
+
+def _load_data_bundle_cached(
+    *,
+    cache_path,
+    tickers=DEFAULT_TICKERS,
+    start_date=DEFAULT_START_DATE,
+    end_date=DEFAULT_END_DATE,
+    price_field=DEFAULT_PRICE_FIELD,
+    train_end=DEFAULT_TRAIN_END,
+    val_end=DEFAULT_VAL_END,
+    cov_diag=True,
+):
+    key = _bundle_cache_key(
+        cache_path=cache_path,
+        tickers=tickers,
+        start_date=start_date,
+        end_date=end_date,
+        price_field=price_field,
+        train_end=train_end,
+        val_end=val_end,
+        cov_diag=cov_diag,
+    )
+    if key in _WORKER_DATA_CACHE:
+        return _WORKER_DATA_CACHE[key]
+
+    ycfg = YahooConfig(
+        tickers=list(tickers),
+        start_date=start_date,
+        end_date=end_date,
+        price_field=price_field,
+        cache_path=cache_path,
+    )
+    dataset = YahooReturnsDataset(ycfg)
+    train_view, val_view, test_view = dataset.split_by_date(
+        train_end=train_end,
+        val_end=val_end,
+    )
+    train_covs = train_view.precompute_expanding_cov(diag=cov_diag)
+
+    bundle = (train_view, val_view, test_view, train_covs)
+    _WORKER_DATA_CACHE[key] = bundle
+    return bundle
+
 
 def run_one(
     seed: int,
@@ -32,6 +109,9 @@ def run_one(
     kf_fixed=False,
     kf_q=1e-3,
     kf_r=1e-3,
+    warmup_kf_epochs=100,
+    warmup_dyn_epochs=100,
+    return_weights=True,
 ):
     # one process = one thread (important for parallel speed)
     torch.set_num_threads(1)
@@ -41,29 +121,22 @@ def run_one(
     set_seed(seed)
 
     if data_bundle is None:
-        tickers = ['MSFT', 'JPM', 'JNJ', 'XOM', 'PG']
-        ycfg = YahooConfig(
-            tickers=tickers,
-            start_date="2022-01-01",
-            end_date="2024-12-31",
-            price_field="Close",
+        train_view, val_view, test_view, train_covs = _load_data_bundle_cached(
             cache_path=cache_path,
-        )
-
-        dataset = YahooReturnsDataset(ycfg)
-        train_view, val_view, test_view = dataset.split_by_date(
-            train_end="2023-03-24",
-            val_end="2023-09-30",
+            tickers=DEFAULT_TICKERS,
+            start_date=DEFAULT_START_DATE,
+            end_date=DEFAULT_END_DATE,
+            price_field=DEFAULT_PRICE_FIELD,
+            train_end=DEFAULT_TRAIN_END,
+            val_end=DEFAULT_VAL_END,
+            cov_diag=True,
         )
 
         # inside backtest_seed.py after train_view is created
         rets = train_view.as_numpy()
         mu = rets.mean(axis=0)
         var = rets.var(axis=0)
-        #print(list(zip(tickers, mu, var, mu - lam*var)))
-
-
-        train_covs = train_view.precompute_expanding_cov(diag=True)
+        #print(list(zip(DEFAULT_TICKERS, mu, var, mu - lam*var)))
     else:
         train_view, val_view, test_view, train_covs = data_bundle
 
@@ -111,7 +184,7 @@ def run_one(
 
     if verbose:
         print("-----------------Training KF-----------------")
-    for epoch in range(100):
+    for epoch in range(warmup_kf_epochs):
         #break
         state = None
         tl, pl, vl, kfl, dynl, simpl, simvl, dr = [], [], [], [], [], [], [], []
@@ -163,7 +236,7 @@ def run_one(
         print("-----------------Training Dynamics-----------------")
 
     # warmup (optional)
-    for epoch in range(100):
+    for epoch in range(warmup_dyn_epochs):
         #break
         state = None
         tl, pl, vl, kfl, dynl, simpl, simvl, dr = [], [], [], [], [], [], [], []
@@ -303,6 +376,7 @@ def run_one(
                 window_size=cfg.window_size,
                 device=cfg.device,
                 sample_policy=False,
+                return_weights=False,
             )
             val_sharpe = float(metrics["sharpe"])
             if verbose: print("Validation Sharpe:", val_sharpe)
@@ -397,6 +471,7 @@ def run_one(
         window_size=cfg.window_size,
         device=cfg.device,
         sample_policy=False,
+        return_weights=return_weights,
     )
     if verbose or print_results:
         split_label = "val" if eval_on_validation else "test"
@@ -417,7 +492,7 @@ def run_one(
         "test_mean_return": float(metrics["mean_return"]),
         "test_std_return": float(metrics["std_return"]),
         "test_max_drawdown": float(metrics["max_drawdown"]),
-        "test_weights": metrics["weights"],
+        "test_weights": metrics.get("weights"),
         "last_return0": float(out["return0"]),
         "best_val_sharpe": float(best_val_sharpe),
         "best_val_sharpe_epoch": int(best_val_sharpe_epoch),
