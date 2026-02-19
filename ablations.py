@@ -113,11 +113,11 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 1000
-    warmup_kf_epochs = 25
-    warmup_dyn_epochs = 25
+    updates = 2000
+    warmup_kf_epochs = 50
+    warmup_dyn_epochs = 50
     networksize = 128
-    seeds = list(range(3))
+    seeds = list(range(50))
     max_workers = min(8, os.cpu_count() or 1)
     save_policies = False
     policy_dir = "grid_search_results/policies" if save_policies else None
@@ -134,8 +134,8 @@ def main():
         "actor_weight": [0.0, 1.0],
         "kappa_unc": [0.0, 0.1, 1.0],
         # new ablations
-        "kf_mode": ["learned"],
-        "dyn_use_sim": [True],
+        "kf_mode": ["learned", "fixed", "none"],
+        "dyn_use_sim": [True, False],
         "evaluate_best_on_test": [False],
         # fixed KF params (only used when kf_mode == "fixed")
         "kf_q": [0.00022],
