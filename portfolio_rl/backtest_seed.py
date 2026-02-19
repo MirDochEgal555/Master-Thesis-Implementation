@@ -102,6 +102,9 @@ def run_one(
     evaluate_best_on_test=False,
     eval_on_validation=False,
     stats_csv_path=None,
+    stats_every: int | None = None,
+    write_stats_on_eval: bool = False,
+    save_final_path: str | None = None,
     networksize: int, 
     learnrate: float,
     data_bundle=None,
@@ -181,6 +184,14 @@ def run_one(
         kf = None
     trainer = Trainer(policy, value, kf, cfg)
     stats_rows = []
+    last_val_sharpe = np.nan
+
+    def _should_log(epoch: int) -> bool:
+        if stats_every is None:
+            return True
+        if stats_every <= 0:
+            return True
+        return epoch % stats_every == 0 and epoch != 0
 
     if verbose:
         print("-----------------Training KF-----------------")
@@ -212,24 +223,25 @@ def run_one(
                 f" Value loss Sim:{np.mean(simvl):.5f}"
                 f" Discounted Reward:{np.mean(dr):.3f}"
             )
-        stats_rows.append(
-            {
-                "phase": "warmup_kf",
-                "epoch": epoch,
-                "seed": seed,
-                "window_size": window_size,
-                "lam": float(lam),
-                "total_loss": float(np.mean(tl)) if tl else np.nan,
-                "policy_loss": float(np.mean(pl)) if pl else np.nan,
-                "value_loss": float(np.mean(vl)) if vl else np.nan,
-                "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
-                "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
-                "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
-                "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
-                "discounted_reward": float(np.mean(dr)) if dr else np.nan,
-                "val_sharpe": np.nan,
-            }
-        )
+        if _should_log(epoch):
+            stats_rows.append(
+                {
+                    "phase": "warmup_kf",
+                    "epoch": epoch,
+                    "seed": seed,
+                    "window_size": window_size,
+                    "lam": float(lam),
+                    "total_loss": float(np.mean(tl)) if tl else np.nan,
+                    "policy_loss": float(np.mean(pl)) if pl else np.nan,
+                    "value_loss": float(np.mean(vl)) if vl else np.nan,
+                    "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
+                    "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
+                    "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
+                    "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
+                    "discounted_reward": float(np.mean(dr)) if dr else np.nan,
+                    "val_sharpe": np.nan,
+                }
+            )
     
 
     if verbose:
@@ -264,24 +276,25 @@ def run_one(
                 f" Value loss Sim:{np.mean(simvl):.5f}"
                 f" Discounted Reward:{np.mean(dr):.3f}"
             )
-        stats_rows.append(
-            {
-                "phase": "warmup_dyn",
-                "epoch": epoch,
-                "seed": seed,
-                "window_size": window_size,
-                "lam": float(lam),
-                "total_loss": float(np.mean(tl)) if tl else np.nan,
-                "policy_loss": float(np.mean(pl)) if pl else np.nan,
-                "value_loss": float(np.mean(vl)) if vl else np.nan,
-                "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
-                "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
-                "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
-                "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
-                "discounted_reward": float(np.mean(dr)) if dr else np.nan,
-                "val_sharpe": np.nan,
-            }
-        )
+        if _should_log(epoch):
+            stats_rows.append(
+                {
+                    "phase": "warmup_dyn",
+                    "epoch": epoch,
+                    "seed": seed,
+                    "window_size": window_size,
+                    "lam": float(lam),
+                    "total_loss": float(np.mean(tl)) if tl else np.nan,
+                    "policy_loss": float(np.mean(pl)) if pl else np.nan,
+                    "value_loss": float(np.mean(vl)) if vl else np.nan,
+                    "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
+                    "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
+                    "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
+                    "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
+                    "discounted_reward": float(np.mean(dr)) if dr else np.nan,
+                    "val_sharpe": np.nan,
+                }
+            )
 
     if verbose:
         print("-----------------Warmup Critic-----------------")
@@ -314,24 +327,25 @@ def run_one(
                 f" Value loss Sim:{np.mean(simvl):.5f}"
                 f" Discounted Reward:{np.mean(dr):.3f}"
             )
-        stats_rows.append(
-            {
-                "phase": "warmup_crit",
-                "epoch": epoch,
-                "seed": seed,
-                "window_size": window_size,
-                "lam": float(lam),
-                "total_loss": float(np.mean(tl)) if tl else np.nan,
-                "policy_loss": float(np.mean(pl)) if pl else np.nan,
-                "value_loss": float(np.mean(vl)) if vl else np.nan,
-                "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
-                "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
-                "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
-                "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
-                "discounted_reward": float(np.mean(dr)) if dr else np.nan,
-                "val_sharpe": np.nan,
-            }
-        )
+        if _should_log(epoch):
+            stats_rows.append(
+                {
+                    "phase": "warmup_crit",
+                    "epoch": epoch,
+                    "seed": seed,
+                    "window_size": window_size,
+                    "lam": float(lam),
+                    "total_loss": float(np.mean(tl)) if tl else np.nan,
+                    "policy_loss": float(np.mean(pl)) if pl else np.nan,
+                    "value_loss": float(np.mean(vl)) if vl else np.nan,
+                    "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
+                    "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
+                    "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
+                    "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
+                    "discounted_reward": float(np.mean(dr)) if dr else np.nan,
+                    "val_sharpe": np.nan,
+                }
+            )
 
     if verbose:
         print("-----------------Warmup Critic Ended - Training Policy-----------------")
@@ -379,6 +393,7 @@ def run_one(
                 return_weights=False,
             )
             val_sharpe = float(metrics["sharpe"])
+            last_val_sharpe = val_sharpe
             if verbose: print("Validation Sharpe:", val_sharpe)
             if save_best_path and val_sharpe > best_val_sharpe:
                 best_val_sharpe = val_sharpe
@@ -397,28 +412,29 @@ def run_one(
                     save_best_path,
                 )
                 best_saved = True
-        stats_rows.append(
-            {
-                "phase": "train",
-                "epoch": epoch,
-                "seed": seed,
-                "window_size": window_size,
-                "lam": float(lam),
-                "total_loss": float(np.mean(tl)) if tl else np.nan,
-                "policy_loss": float(np.mean(pl)) if pl else np.nan,
-                "value_loss": float(np.mean(vl)) if vl else np.nan,
-                "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
-                "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
-                "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
-                "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
-                "discounted_reward": float(np.mean(dr)) if dr else np.nan,
-                "val_sharpe": val_sharpe,
-            }
-        )
+        if _should_log(epoch):
+            stats_rows.append(
+                {
+                    "phase": "train",
+                    "epoch": epoch,
+                    "seed": seed,
+                    "window_size": window_size,
+                    "lam": float(lam),
+                    "total_loss": float(np.mean(tl)) if tl else np.nan,
+                    "policy_loss": float(np.mean(pl)) if pl else np.nan,
+                    "value_loss": float(np.mean(vl)) if vl else np.nan,
+                    "kf_loss": float(np.mean(kfl)) if kfl else np.nan,
+                    "dyn_loss": float(np.mean(dynl)) if dynl else np.nan,
+                    "sim_policy_loss": float(np.mean(simpl)) if simpl else np.nan,
+                    "sim_value_loss": float(np.mean(simvl)) if simvl else np.nan,
+                    "discounted_reward": float(np.mean(dr)) if dr else np.nan,
+                    "val_sharpe": val_sharpe,
+                }
+            )
 
     if verbose:
         print("-----------------Training Ended-----------------")
-    if stats_csv_path and stats_rows and not eval_on_validation:
+    if stats_csv_path and stats_rows and (write_stats_on_eval or not eval_on_validation):
         stats_dir = os.path.dirname(stats_csv_path)
         if stats_dir:
             os.makedirs(stats_dir, exist_ok=True)
@@ -443,6 +459,21 @@ def run_one(
                 "cfg": vars(cfg),
             },
             save_best_path,
+        )
+
+    if save_final_path:
+        save_dir = os.path.dirname(save_final_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+        torch.save(
+            {
+                "epoch": last_epoch,
+                "val_sharpe": float(last_val_sharpe),
+                "policy_state_dict": policy.state_dict(),
+                "kf_state_dict": kf.state_dict() if kf is not None else None,
+                "cfg": vars(cfg),
+            },
+            save_final_path,
         )
 
     # evaluate once (test or validation-only)
