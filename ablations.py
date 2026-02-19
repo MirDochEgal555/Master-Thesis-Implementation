@@ -113,11 +113,11 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 2000
-    warmup_kf_epochs = 50
-    warmup_dyn_epochs = 50
+    updates = 1000
+    warmup_kf_epochs = 25
+    warmup_dyn_epochs = 25
     networksize = 128
-    seeds = list(range(50))
+    seeds = list(range(30))
     max_workers = min(8, os.cpu_count() or 1)
     save_policies = False
     policy_dir = "grid_search_results/policies" if save_policies else None
@@ -125,14 +125,14 @@ def main():
 
     # --- hyperparameter grid ---
     grid = {
-        "window_size": [1, 10, 20],
-        "lr_actor": [1e-5, 1e-5, 1e-3],
-        "dyn_sim_M": [5, 10, 20],
-        "dyn_sim_deterministic": [True, False],
-        "dyn_sim_pl_weight": [0.1, 0.5, 1.0],
-        "lam": [1.0, 10.0, 20.0],
-        "actor_weight": [0.0, 1.0],
-        "kappa_unc": [0.0, 0.1, 1.0],
+        "window_size": [10],
+        "lr_actor": [1e-3],
+        "dyn_sim_M": [20],
+        "dyn_sim_deterministic": [True],
+        "dyn_sim_pl_weight": [0.1],
+        "lam": [1.0],
+        "actor_weight": [1.0],
+        "kappa_unc": [1.0],
         # new ablations
         "kf_mode": ["learned", "fixed", "none"],
         "dyn_use_sim": [True, False],
@@ -145,7 +145,7 @@ def main():
     keys = list(grid.keys())
     combos = list(itertools.product(*[grid[k] for k in keys]))
 
-    out_path = "sweep_results.csv"
+    out_path = "ablations.csv"
     combo_seed_vals = {i: [] for i in range(len(combos))}
     existing_settings = set()
     combo_to_id = {combo: i for i, combo in enumerate(combos)}
