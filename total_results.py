@@ -315,7 +315,7 @@ def _run_job(args):
 def main():
     # --- fixed settings (edit as needed) ---
     #window_size = 1
-    updates = 3000
+    updates = 10000
     warmup_kf_epochs = 100
     warmup_dyn_epochs = 100
     networksize = 128
