@@ -1,21 +1,23 @@
 # Master Thesis Implementation
 
 Research code for reinforcement-learning portfolio optimization with optional
-Kalman filtering and dynamics modeling. The repository includes scripts for
-single runs, grid searches, larger sweeps, baseline strategy evaluation, and
-post-run reporting/plotting.
+Kalman filtering and dynamics modeling. The active workflow is centered on
+ablations, sweeps, baseline evaluation, and post-run plotting of checkpoints
+and losses.
 
 ## Project Layout
-- `main.py`: Single-run training/backtest entry point (`portfolio_rl.backtest_seed.run_one`).
-- `run_grid_search.py`: Parallel grid search across seeds, window size, lambda, network size, and learning rate.
-- `run_backtest_grid.py`: Parallel backtest grid across seeds, window size, and lambda.
-- `sweep_grid.py`: Broader sweep utility that appends results to `sweep_results.csv`.
+- `ablations.py`: Ablation sweep over Kalman and simulation settings; appends to `ablations.csv`.
+- `sweep_grid.py`: Broad hyperparameter sweep utility that appends to `sweep_results.csv`.
+- `total_results.py`: Full experiment runner that writes both `total_results_final.csv` and `total_results_best.csv`, and can save checkpoints/loss traces.
+- `3000 updates/`: Stored `total_results.py` artifacts for the 3000-update run (tables, policies, checkpoints, losses, plots).
+- `10000 updates/`: Stored `total_results.py` artifacts for the 10000-update run (tables, policies, checkpoints, losses).
 - `baselines.py`: Baseline evaluation (equal-weight, inverse-volatility, minimum-variance).
-- `grid_search_report.py`: Parses `grid_search_lines.txt` into CSV summaries.
-- `plot_learning_stats.py`: Plots validation Sharpe, normalized losses, and discounted reward from a stats CSV.
-- `learning_comparison.py`: Compares learning curves across multiple runs.
 - `kalman_filter_fitting.py`: Q/R sweep for Kalman filter diagnostics and heatmaps.
+- `kalman_fitting/`: Stored Kalman fitting artifacts (`kalman_fitting_results_sorted.txt` and heatmaps).
+- `plot_losses_nonzero.py`: Plot normalized non-zero loss curves from a losses CSV.
+- `policy_checkpoint_matplot.py`: Evaluate saved checkpoint(s) and export weights as CSV/MAT/PNG.
 - `portfolio_rl/`: Core package (data loading, models, trainer, rollouts, Kalman, dynamics, backtesting).
+- `archive/`: Legacy scripts and historical experiment artifacts moved out of the active workflow.
 - `requirements.txt`: Python dependencies.
 
 ## Setup
@@ -36,19 +38,19 @@ pip install -r requirements.txt
 ```
 
 ## Quick Start
-Single run (uses hard-coded settings in `main.py`):
+Run ablations:
 ```bash
-python main.py
+python ablations.py
 ```
 
-Grid search:
+Run broad sweep:
 ```bash
-python run_grid_search.py
+python sweep_grid.py
 ```
 
-Backtest grid:
+Run final-vs-best evaluation sweep:
 ```bash
-python run_backtest_grid.py
+python total_results.py
 ```
 
 Baseline strategies:
@@ -56,46 +58,37 @@ Baseline strategies:
 python baselines.py
 ```
 
-## Common Outputs
-- `returns.parquet`: Cached return series downloaded from `yfinance` (created on first run).
-- `weights.txt`: Latest test weights from `main.py` or `run_backtest_grid.py`.
-- `learning_stats_kf.csv`: Per-epoch training/validation stats from `main.py`.
-- `grid_search_lines.txt`: Line-by-line completed grid-search jobs.
-- `grid_search_summary.txt`: Aggregated summary from `run_grid_search.py`.
-- `backtest_grid.txt`: Aggregated summary from `run_backtest_grid.py`.
-- `sweep_results.csv`: Incremental sweep results from `sweep_grid.py`.
-- `baseline_metrics_val.csv`, `baseline_metrics_test.csv`: Baseline metrics.
-
-## Reporting and Plotting
-Generate CSV reports from `grid_search_lines.txt`:
-```bash
-python grid_search_report.py
-```
-Generated files:
-- `grid_search_raw.csv`
-- `grid_search_seed_avg.csv`
-- `grid_search_lambda_avg.csv`
-- `grid_search_window_avg.csv`
-- `grid_search_networksize_avg.csv`
-- `grid_search_learnrate_avg.csv`
-
-Plot learning statistics from a run:
-```bash
-python plot_learning_stats.py learning_stats_kf.csv --out-dir .
-```
-
-Compare multiple learning runs:
-```bash
-python learning_comparison.py --run "A=path/to/run1.csv,path/to/run2.csv" --run "B=path/to/run3.csv" --out-path comparison.png --global-step --smooth 3
-```
-
-Kalman Q/R fitting sweep (writes `kalman_fitting_results_sorted.txt` and heatmaps):
+Kalman Q/R fitting sweep (writes artifacts in `kalman_fitting/`):
 ```bash
 python kalman_filter_fitting.py
 ```
 
+## Common Outputs
+- `returns.parquet`: Cached return series downloaded from `yfinance` (created on first run).
+- `ablations.csv`: Aggregated ablation results from `ablations.py`.
+- `sweep_results.csv`: Incremental sweep results from `sweep_grid.py`.
+- `3000 updates/total_results_final.csv`, `3000 updates/total_results_best.csv`: `total_results.py` metrics for the 3000-update configuration.
+- `10000 updates/total_results_final.csv`, `10000 updates/total_results_best.csv`: `total_results.py` metrics for the 10000-update configuration.
+- `3000 updates/losses/losses_combo*_seed*.csv`, `10000 updates/losses/losses_combo*_seed*.csv`: Per-epoch loss traces from `total_results.py`.
+- `baseline_metrics_val.csv`, `baseline_metrics_test.csv`: Baseline metrics.
+- `weights_inverse_vol_*.csv`, `weights_min_variance_*.csv`: Baseline strategy weights.
+- `kalman_fitting/kalman_fitting_results_sorted.txt`, `kalman_fitting/*_heatmap.png`: Ranked Kalman Q/R diagnostics and heatmaps.
+- `policy_weight_outputs/*_weights.csv|.mat|.png`: Checkpoint evaluation outputs.
+
+## Reporting and Plotting
+Plot normalized non-zero losses from a losses CSV:
+```bash
+python plot_losses_nonzero.py grid_search_results/losses/losses_combo1_seed4.csv --out losses_nonzero.png
+```
+
+Evaluate one or more policy checkpoints and export weights + plots:
+```bash
+python policy_checkpoint_matplot.py --checkpoint-dir grid_search_results/final_policies --out-dir policy_weight_outputs
+```
+
 ## Notes
 - Most driver scripts use fixed parameter lists directly in the file. Edit those lists to run your own experiments.
+- Legacy entrypoints (single-run and older grid-search/report scripts) are kept under `archive/`.
 - Process-based parallel scripts rely on `if __name__ == "__main__"` entry points; run them as scripts (not from interactive notebooks without proper guards).
 
 ## License

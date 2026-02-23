@@ -14,18 +14,26 @@ generated artifacts.
 
 Experiments are organized around the following entry scripts:
 \begin{itemize}
-    \item \texttt{main.py}: single-run training and backtest.
-    \item \texttt{run\_grid\_search.py}: parallel grid search over seeds and hyperparameters.
-    \item \texttt{run\_backtest\_grid.py}: parallel backtest grid over seeds.
+    \item \texttt{ablations.py}: ablation sweep over Kalman and simulation settings.
     \item \texttt{sweep\_grid.py}: extended sweep utility with incremental CSV logging.
+    \item \texttt{total\_results.py}: full experiment runner with final-vs-best checkpoint evaluation.
+    \item \texttt{3000 updates/}: stored artifacts from \texttt{total\_results.py} runs with \texttt{updates=3000}.
+    \item \texttt{10000 updates/}: stored artifacts from \texttt{total\_results.py} runs with \texttt{updates=10000}.
     \item \texttt{baselines.py}: baseline portfolio strategies.
-    \item \texttt{grid\_search\_report.py}: parsing and aggregation of line logs.
-    \item \texttt{plot\_learning\_stats.py}, \texttt{learning\_comparison.py}: plotting utilities.
+    \item \texttt{kalman\_filter\_fitting.py}: Q/R sweep diagnostics for the Kalman filter.
+    \item \texttt{kalman\_fitting/}: stored Kalman fitting diagnostics (ranked table and heatmaps).
+    \item \texttt{plot\_losses\_nonzero.py}: plotting utility for non-zero normalized losses.
+    \item \texttt{policy\_checkpoint\_matplot.py}: checkpoint evaluation with CSV/MAT/PNG weight export.
+    \item \texttt{archive/}: legacy entry scripts and historical artifacts retained outside the active workflow.
 \end{itemize}
 
 Core logic is implemented in the \texttt{portfolio\_rl/} package:
 data loading, model definitions, Kalman filtering, dynamics model, rollouts,
 training, and evaluation.
+
+The stochastic-policy variant and its associated result artifacts are maintained
+in the Git branch \texttt{stochastic} (remote: \texttt{origin/stochastic}),
+rather than in the active \texttt{main} branch documented in this appendix.
 
 \section{Software Environment}
 
@@ -84,7 +92,8 @@ projection for training.
 \end{itemize}
 
 The hidden width is controlled by script-level settings (e.g.,
-\texttt{networksize} in \texttt{main.py} and \texttt{run\_grid\_search.py}).
+\texttt{networksize} in \texttt{ablations.py}, \texttt{sweep\_grid.py}, and
+\texttt{total\_results.py}).
 
 \subsection{Kalman Filter}
 
@@ -115,8 +124,15 @@ r_t
 \left(\frac{\lVert w_t - w_{t-1} \rVert_1}{\tau} - 1\right)^2\right).
 \]
 
-Training combines actor, critic, Kalman, dynamics, and simulated policy losses
-with scalar weights from \texttt{TrainConfig}.
+For the experiments reported in this project, the value critic and both turnover
+terms were disabled: \texttt{use\_critic=False},
+\texttt{cost\_coef=0.0}, and \texttt{turn\_coef=0.0}. Therefore, no critic loss
+update was used, and the turnover cost/shaping components were not active in the
+effective reward.
+
+Training in code supports actor, critic, Kalman, dynamics, and simulated policy
+losses with scalar weights from \texttt{TrainConfig}; in the reported runs, the
+critic branch was switched off.
 
 \subsection{Training Phases}
 
@@ -162,15 +178,22 @@ differences.
 
 The defaults currently in the repository are:
 \begin{itemize}
-    \item \texttt{main.py}: single run (seed 0), \texttt{window\_size=1},
-    \texttt{lam=10}, \texttt{networksize=128}, \texttt{learnrate=1e-5},
-    \texttt{updates=1500}, with optional best-checkpoint saving.
-    \item \texttt{run\_grid\_search.py}: seeds 0--9, currently configured with
-    one-point grids for window size, lambda, network size, and learning rate.
-    \item \texttt{run\_backtest\_grid.py}: seeds 0--20, currently configured
-    with one-point grids for window size and lambda.
+    \item \texttt{ablations.py}: \texttt{updates=1000}, seeds 0--29, and an
+    ablation grid across \texttt{kf\_mode} (\texttt{learned/fixed/none}) and
+    \texttt{dyn\_use\_sim} (\texttt{True/False}), written to
+    \texttt{ablations.csv}.
     \item \texttt{sweep\_grid.py}: configurable wider search with append-safe
-    CSV logging in \texttt{sweep\_results.csv}.
+    CSV logging in \texttt{sweep\_results.csv} (default seeds 0--2).
+    \item \texttt{total\_results.py}: seeds 0--49 with output tables
+    \texttt{total\_results\_final.csv} and \texttt{total\_results\_best.csv}.
+    In this repository, representative outputs are organized under
+    \texttt{3000 updates/} and \texttt{10000 updates/}
+    (including tables, checkpoints/policies, and losses).
+    \item Across active experiment scripts, the critic/value branch is disabled
+    (\texttt{use\_critic=False}) and turnover penalties/shaping are disabled
+    (\texttt{cost\_coef=0.0}, \texttt{turn\_coef=0.0}).
+    \item \texttt{baselines.py}: writes baseline metrics and inverse-vol/min-variance
+    weights for validation and test splits.
 \end{itemize}
 
 These scripts are intentionally parameterized directly in code. Reproducing
@@ -182,41 +205,47 @@ the corresponding experiment revision.
 Typical generated files are:
 \begin{itemize}
     \item \texttt{returns.parquet}: cached returns data.
-    \item \texttt{learning\_stats\_kf.csv}: per-epoch training statistics.
-    \item \texttt{grid\_search\_lines.txt}: per-job grid log.
-    \item \texttt{grid\_search\_summary.txt}: aggregated grid summary.
-    \item \texttt{backtest\_grid.txt}: aggregated backtest summary.
-    \item \texttt{weights.txt}: latest saved test weights.
-    \item \texttt{grid\_search\_raw.csv}, \texttt{grid\_search\_seed\_avg.csv},
-    \texttt{grid\_search\_lambda\_avg.csv},
-    \texttt{grid\_search\_window\_avg.csv},
-    \texttt{grid\_search\_networksize\_avg.csv},
-    \texttt{grid\_search\_learnrate\_avg.csv}.
+    \item \texttt{ablations.csv}: ablation results from \texttt{ablations.py}.
+    \item \texttt{sweep\_results.csv}: wide-sweep results from \texttt{sweep\_grid.py}.
+    \item \texttt{3000 updates/total\_results\_final.csv},
+    \texttt{3000 updates/total\_results\_best.csv},
+    \texttt{10000 updates/total\_results\_final.csv}, and
+    \texttt{10000 updates/total\_results\_best.csv}:
+    final-policy and best-validation-policy test metrics from \texttt{total\_results.py}.
+    \item \texttt{3000 updates/losses/losses\_combo*\_seed*.csv} and
+    \texttt{10000 updates/losses/losses\_combo*\_seed*.csv}:
+    per-epoch loss traces from \texttt{total\_results.py}.
+    \item \texttt{baseline\_metrics\_val.csv}, \texttt{baseline\_metrics\_test.csv}:
+    baseline metrics from \texttt{baselines.py}.
+    \item \texttt{weights\_inverse\_vol\_val.csv}, \texttt{weights\_inverse\_vol\_test.csv},
+    \texttt{weights\_min\_variance\_val.csv}, \texttt{weights\_min\_variance\_test.csv}:
+    baseline strategy weights.
+    \item \texttt{kalman\_fitting/kalman\_fitting\_results\_sorted.txt} and
+    \texttt{kalman\_fitting/*\_heatmap.png}: Kalman Q/R diagnostics.
+    \item \texttt{policy\_weight\_outputs/*\_weights.csv|.mat|.png}: checkpoint
+    post-processing outputs from \texttt{policy\_checkpoint\_matplot.py}.
 \end{itemize}
-
-The report CSVs are produced by:
-\begin{verbatim}
-python grid_search_report.py
-\end{verbatim}
 
 \section{Minimal Reproduction Procedure}
 
 \begin{enumerate}
     \item Create and activate a clean Python environment.
     \item Install dependencies from \texttt{requirements.txt}.
-    \item Run one of:
+    \item Run one or more active experiment scripts:
     \begin{verbatim}
-python main.py
-python run_grid_search.py
-python run_backtest_grid.py
+python ablations.py
+python sweep_grid.py
+python total_results.py
+python baselines.py
 \end{verbatim}
-    \item For grid-search post-processing:
+    \item For Kalman filter diagnostics:
     \begin{verbatim}
-python grid_search_report.py
+python kalman_filter_fitting.py
 \end{verbatim}
-    \item For plots:
+    \item For loss plotting and checkpoint post-processing:
     \begin{verbatim}
-python plot_learning_stats.py learning_stats_kf.csv --out-dir .
+python plot_losses_nonzero.py grid_search_results/losses/losses_combo1_seed4.csv --out losses_nonzero.png
+python policy_checkpoint_matplot.py --checkpoint-dir grid_search_results/final_policies --out-dir policy_weight_outputs
 \end{verbatim}
 \end{enumerate}
 
